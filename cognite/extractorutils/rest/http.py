@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import TypeVar, Generic
+from typing import Generic, TypeVar
 from urllib.parse import urlparse
 from uuid import UUID
 
