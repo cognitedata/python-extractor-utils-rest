@@ -8,7 +8,7 @@ from urllib.parse import urljoin
 import dacite
 import requests
 from cognite.client.data_classes import Datapoint, Event, FileMetadata, Row
-from cognite.extractorutils.authentication import AuthenticatorConfig
+from cognite.extractorutils.authentication import Authenticator, AuthenticatorConfig
 from cognite.extractorutils.configtools import BaseConfig
 from cognite.extractorutils.uploader import EventUploadQueue
 from more_itertools import peekable
@@ -29,6 +29,7 @@ class Endpoint(Generic[ResponseType]):
     method: HttpMethod
     path: str
     query: Dict[str, Any]
+    headers: Dict[str, Union[str, Callable[[], str]]]
     body: Optional[RequestBody]
     response_type: Type[ResponseType]
     next_url: Optional[Callable[[str, ResponseType], Optional[str]]]
@@ -37,7 +38,6 @@ class Endpoint(Generic[ResponseType]):
 
 @dataclass
 class SourceConfig:
-    # TODO: Actually use these, and add them to request headers
     idp_authentication: Optional[AuthenticatorConfig] = None
     headers: Optional[Dict[str, Any]] = None
 
@@ -47,16 +47,16 @@ class RestConfig(BaseConfig):
     source: SourceConfig = SourceConfig()
 
 
-class RestExtractor(Extractor):
+class RestExtractor(Extractor[RestConfig]):
     def __init__(
         self,
         *,
         name: str,
         description: str,
         version: Optional[str] = None,
-        cancelation_token: Event = threading.Event(),
         base_url: Optional[str],
         headers: Optional[Dict[str, Union[str, Callable[[], str]]]] = None,
+        cancelation_token: Event = threading.Event(),
     ):
         super(RestExtractor, self).__init__(
             name=name,
@@ -67,8 +67,14 @@ class RestExtractor(Extractor):
             config_class=RestConfig,
         )
         self.base_url = base_url or ""
-        self.headers = headers or {}
+        self.headers: Dict[str, Union[str, Callable[[], str]]] = headers or {}
         self.endpoints: List[Endpoint] = []
+
+        self.authenticator: Optional[Authenticator]
+        if self.config.source.idp_authentication:
+            self.authenticator = Authenticator(self.config.source.idp_authentication)
+        else:
+            self.authenticator = None
 
     def endpoint(
         self,
@@ -76,6 +82,7 @@ class RestExtractor(Extractor):
         method: HttpMethod,
         path: str,
         query: Dict[str, Any],
+        headers: Dict[str, Union[str, Callable[[], str]]],
         body: Optional[RequestBody],
         response_type: Type[ResponseType],
         next_url: Optional[Callable[[str, ResponseType], Optional[str]]],
@@ -88,6 +95,7 @@ class RestExtractor(Extractor):
                     method=method,
                     path=path,
                     query=query,
+                    headers=headers,
                     body=body,
                     response_type=response_type,
                     next_url=next_url,
@@ -103,6 +111,7 @@ class RestExtractor(Extractor):
         path: str,
         *,
         query: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, Union[str, Callable[[], str]]]] = None,
         response_type: Type[ResponseType],
         next_url: Optional[Callable[[HttpCall], Optional[HttpUrl]]] = None,
         interval: Optional[int] = None,
@@ -111,6 +120,7 @@ class RestExtractor(Extractor):
             method=HttpMethod.GET,
             path=path,
             query=query,
+            headers=headers or {},
             body=None,
             response_type=response_type,
             next_url=next_url,
@@ -122,8 +132,7 @@ class RestExtractor(Extractor):
         # TODO: Add more uplaod queues
         self.event_queue = EventUploadQueue(
             self.cognite_client, max_queue_size=10_000, max_upload_interval=60, trigger_log_level="INFO"
-        )
-        self.event_queue.__enter__()
+        ).__enter__()
         return self
 
     def __exit__(
@@ -145,6 +154,23 @@ class RestExtractor(Extractor):
         else:
             raise ValueError(f"Unexpected type: {type(output[0])}")
 
+    def _get_or_call(self, item: Union[str, Callable[[], str]]) -> str:
+        return item() if isinstance(item, Callable) else item
+
+    def _prepare_headers(self, endpoint: Endpoint) -> Dict[str, str]:
+        headers = {k: self._get_or_call(v) for k, v in self.headers.items()}
+
+        for k, v in endpoint.headers.items():
+            headers[k] = self._get_or_call(v)
+
+        for k, v in self.config.source.headers.items():
+            headers[k] = v
+
+        if self.authenticator:
+            headers["Authentication"] = f"Bearer {self.authenticator.get_token()}"
+
+        return headers
+
     def run(self) -> None:
         if not self.started:
             raise ValueError("You must run the extractor in a context manager")
@@ -152,8 +178,9 @@ class RestExtractor(Extractor):
         for endpoint in self.endpoints:
             url = urljoin(self.base_url, endpoint.path)
             self.logger.info(f"{endpoint.method.value} {url}")
-            requests.request(method=endpoint.method.value, url=url, headers=self.headers)
-            raw_response = requests.request(method=endpoint.method.value, url=url, headers=self.headers)
+            raw_response = requests.request(
+                method=endpoint.method.value, url=url, headers=self._prepare_headers(endpoint)
+            )
             data = raw_response.json()
             response = dacite.from_dict(endpoint.response_type, data)
             result = endpoint.implementation(response)
