@@ -1,27 +1,28 @@
 import os
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, Generator, List, Optional
 
-from cognite.client.data_classes import Event
+from cognite.client.data_classes import Row
 
 from cognite.extractorutils.rest import RestExtractor
+from cognite.extractorutils.rest.types import Event, RawRow
 
 
 @dataclass
 class RawEvent:
-    external_id: Optional[str]
-    data_set_id: Optional[int]
-    start_time: Optional[int]
-    end_time: Optional[int]
+    externalId: Optional[str]
+    dataSetId: Optional[int]
+    startTime: Optional[int]
+    endTime: Optional[int]
     type: Optional[str]
     subtype: Optional[str]
     description: Optional[str]
     metadata: Optional[Dict[str, str]]
-    asset_ids: Optional[List[Optional[int]]]
+    assetIds: Optional[List[Optional[int]]]
     source: Optional[str]
     id: Optional[int]
-    last_updated_time: Optional[int]
-    created_time: Optional[int]
+    lastUpdatedTime: Optional[int]
+    createdTime: Optional[int]
 
 
 @dataclass
@@ -40,9 +41,39 @@ extractor = RestExtractor(
 
 
 @extractor.get("events", response_type=EventsList)
-def get_events(events: EventsList) -> List[Event]:
+def get_events(events: EventsList) -> Generator[Event, None, None]:
     for event in events.items:
-        yield Event(external_id=f"testy-{event.id}", start_time=event.start_time, end_time=event.end_time)
+        yield Event(
+            external_id=f"testy-{event.id}",
+            description=event.description,
+            start_time=event.startTime,
+            end_time=event.endTime,
+            type=event.type,
+            subtype=event.subtype,
+            metadata=event.metadata,
+            source=event.source,
+        )
+
+
+@extractor.get("events", response_type=EventsList)
+def get_events_as_raw(events: EventsList) -> Generator[RawRow, None, None]:
+    for event in events.items:
+        yield RawRow(
+            "db1",
+            "table1",
+            Row(
+                key=event.id,
+                columns={
+                    "description": event.description,
+                    "start_time": event.startTime,
+                    "end_time": event.endTime,
+                    "type": event.type,
+                    "subtype": event.subtype,
+                    "metadata": event.metadata,
+                    "source": event.source,
+                },
+            ),
+        )
 
 
 with extractor:
