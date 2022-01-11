@@ -25,7 +25,7 @@ class Endpoint:
     headers: Dict[str, Union[str, Callable[[], str]]]
     body: Optional[RequestBody]
     response_type: Type[ResponseType]
-    next_url: Optional[Callable[[str, ResponseType], Optional[str]]]
+    next_url: Optional[Callable[[HttpCall], Optional[HttpUrl]]]
     interval: Optional[int]
 
 
@@ -76,8 +76,8 @@ class RestExtractor(Extractor[RestConfig]):
         response_type: Type[ResponseType],
         next_url: Optional[Callable[[HttpCall], Optional[HttpUrl]]],
         interval: Optional[int],
-    ):
-        def decorator(func):
+    ) -> Callable[[ResponseType], CdfTypes]:
+        def decorator(func: Callable[[ResponseType], CdfTypes]) -> Callable[[ResponseType], CdfTypes]:
             self.endpoints.append(
                 Endpoint(
                     implementation=func,
@@ -104,7 +104,7 @@ class RestExtractor(Extractor[RestConfig]):
         response_type: Type[ResponseType],
         next_url: Optional[Callable[[HttpCall], Optional[HttpUrl]]] = None,
         interval: Optional[int] = None,
-    ):
+    ) -> Callable[[ResponseType], CdfTypes]:
         return self.endpoint(
             method=HttpMethod.GET,
             path=path,
