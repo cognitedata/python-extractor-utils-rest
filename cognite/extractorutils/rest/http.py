@@ -13,14 +13,25 @@
 #  limitations under the License.
 
 from enum import Enum
-from typing import Generic, TypeVar
+from typing import Callable, Dict, Generic, List, TypeVar, Union
 from urllib.parse import urlparse
 from uuid import UUID
 
 import arrow
 
-RequestBody = TypeVar("RequestBody")
 ResponseType = TypeVar("ResponseType")
+
+# Ignoring types here, since recursive types are not yet supported by mypy:  https://github.com/python/mypy/issues/731
+JsonTypes = Union[str, int, float, bool]
+RequestBody = Union[JsonTypes, List["RequestBody"], Dict[str, "RequestBody"]]  # type: ignore
+RequestBodyTemplate = Union[  # type: ignore
+    JsonTypes,
+    Callable[[], JsonTypes],
+    List["RequestBodyTemplate"],  # type: ignore
+    Callable[[], List["RequestBodyTemplate"]],  # type: ignore
+    Dict[str, "RequestBodyTemplate"],  # type: ignore
+    Callable[[], Dict[str, "RequestBodyTemplate"]],  # type: ignore
+]
 
 
 class HttpMethod(Enum):

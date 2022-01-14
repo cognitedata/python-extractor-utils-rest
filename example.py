@@ -50,7 +50,7 @@ extractor = RestExtractor(
     description="Testytesty",
     version="1.0.0",
     base_url="https://api.cognitedata.com/api/v1/projects/jetfiretest/",
-    headers={"api-key": os.environ["COGNITE_API_KEY"]},
+    headers={"api-key": os.environ["SOURCE_API_KEY"]},
 )
 
 
@@ -59,6 +59,21 @@ def get_events(events: EventsList) -> Generator[Event, None, None]:
     for event in events.items:
         yield Event(
             external_id=f"testy-{event.id}",
+            description=event.description,
+            start_time=event.startTime,
+            end_time=event.endTime,
+            type=event.type,
+            subtype=event.subtype,
+            metadata=event.metadata,
+            source=event.source,
+        )
+
+
+@extractor.post("events/list", body={"filter": {}, "limit": 1000}, response_type=EventsList)
+def get_events_post(events: EventsList) -> Generator[Event, None, None]:
+    for event in events.items:
+        yield Event(
+            external_id=f"testy2-{event.id}",
             description=event.description,
             start_time=event.startTime,
             end_time=event.endTime,
