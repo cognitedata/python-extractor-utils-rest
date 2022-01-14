@@ -76,7 +76,7 @@ with extractor:
 
 ```
 
-A full example is provided in th `example.py` file.
+A full example is provided in the [`example.py`](./example.py) file.
 
 
 ## Contributing
