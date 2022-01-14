@@ -31,7 +31,6 @@ from cognite.extractorutils.rest.http import (
     HttpCall,
     HttpMethod,
     HttpUrl,
-    JsonTypes,
     RequestBody,
     RequestBodyTemplate,
     ResponseType,
@@ -75,9 +74,6 @@ def _format_body(body: Optional[RequestBodyTemplate]) -> Optional[str]:
         return None
 
     def recursive_get_or_call(item: RequestBodyTemplate) -> RequestBody:
-        if isinstance(body, JsonTypes):
-            return body
-
         if isinstance(item, dict):
             return {k: recursive_get_or_call(v) for k, v in item.items()}
         elif isinstance(item, list):
