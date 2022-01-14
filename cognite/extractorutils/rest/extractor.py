@@ -22,11 +22,11 @@ from urllib.parse import urljoin
 import dacite
 import requests
 from cognite.extractorutils.authentication import Authenticator, AuthenticatorConfig
+from cognite.extractorutils.base import Extractor
 from cognite.extractorutils.configtools import BaseConfig
 from cognite.extractorutils.uploader import EventUploadQueue, RawUploadQueue
 from more_itertools import peekable
 
-from cognite.extractorutils import Extractor
 from cognite.extractorutils.rest.http import (
     HttpCall,
     HttpMethod,
