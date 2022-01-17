@@ -8,7 +8,7 @@ readme = "README.md"
 repository = "https://github.com/cognitedata/python-extractor-utils-rest"
 
 packages = [
-    { include="cognite", from="." },
+    { include="cognite/extractorutils/rest", from="." },
 ]
 
 [tool.black]
@@ -35,7 +35,7 @@ black = "*"
 isort = "*"
 mypy = "*"
 flake8 = "*"
-pytest = "^5.4.1"
+pytest = "^6.2.5"
 pytest-cov = "^2.8.1"
 sphinx = "^4.2.0"
 sphinx-rtd-theme = "^1.0.0"

@@ -30,5 +30,8 @@ jobs:
     - name: Check codestyle
       run: pre-commit run --all
 
+    - name: Run tests
+      run: bash run_tests.sh
+
     - name: Build package
       run: poetry build
