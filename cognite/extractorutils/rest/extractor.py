@@ -11,12 +11,12 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
-
 import json
 import threading
 from dataclasses import dataclass
+from logging import getLogger
 from types import TracebackType
-from typing import Any, Callable, Dict, Generic, Iterable, List, Optional, Type, TypeVar, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Type, TypeVar, Union
 from urllib.parse import urljoin
 
 import dacite
@@ -28,6 +28,7 @@ from cognite.extractorutils.uploader import EventUploadQueue, RawUploadQueue
 from more_itertools import peekable
 
 from cognite.extractorutils.rest.http import (
+    Endpoint,
     HttpCall,
     HttpMethod,
     HttpUrl,
@@ -36,22 +37,6 @@ from cognite.extractorutils.rest.http import (
     ResponseType,
 )
 from cognite.extractorutils.rest.types import CdfTypes, Event, RawRow
-
-T = TypeVar("T")
-ResponseTypeGeneric = TypeVar("ResponseTypeGeneric")
-
-
-@dataclass
-class Endpoint(Generic[ResponseTypeGeneric]):
-    implementation: Callable[[ResponseTypeGeneric], CdfTypes]
-    method: HttpMethod
-    path: str
-    query: Dict[str, Any]
-    headers: Dict[str, Union[str, Callable[[], str]]]
-    body: Optional[RequestBodyTemplate]
-    response_type: Type[ResponseTypeGeneric]
-    next_url: Optional[Callable[[HttpCall], Optional[HttpUrl]]]
-    interval: Optional[int]
 
 
 @dataclass
@@ -63,28 +48,6 @@ class SourceConfig:
 @dataclass
 class RestConfig(BaseConfig):
     source: SourceConfig = SourceConfig()
-
-
-def _get_or_call(item: Union[T, Callable[[], T]]) -> T:
-    return item() if callable(item) else item
-
-
-def _format_body(body: Optional[RequestBodyTemplate]) -> Optional[str]:
-    if body is None:
-        return None
-
-    def recursive_get_or_call(item: RequestBodyTemplate) -> RequestBody:
-        if isinstance(item, dict):
-            return {k: recursive_get_or_call(v) for k, v in item.items()}
-        elif isinstance(item, list):
-            return [recursive_get_or_call(i) for i in item]
-        else:
-            res = _get_or_call(item)
-            if isinstance(res, (list, dict)):
-                return recursive_get_or_call(res)
-            return res
-
-    return json.dumps(recursive_get_or_call(body))
 
 
 class RestExtractor(Extractor[RestConfig]):
@@ -121,7 +84,7 @@ class RestExtractor(Extractor[RestConfig]):
         headers: Dict[str, Union[str, Callable[[], str]]],
         body: Optional[RequestBodyTemplate],
         response_type: Type[ResponseType],
-        next_url: Optional[Callable[[HttpCall], Optional[HttpUrl]]],
+        next_page: Optional[Callable[[HttpCall], Optional[HttpUrl]]],
         interval: Optional[int],
     ) -> Callable[[Callable[[ResponseType], CdfTypes]], Callable[[ResponseType], CdfTypes]]:
         def decorator(func: Callable[[ResponseType], CdfTypes]) -> Callable[[ResponseType], CdfTypes]:
@@ -134,7 +97,7 @@ class RestExtractor(Extractor[RestConfig]):
                     headers=headers,
                     body=body,
                     response_type=response_type,
-                    next_url=next_url,
+                    next_page=next_page,
                     interval=interval,
                 )
             )
@@ -149,7 +112,7 @@ class RestExtractor(Extractor[RestConfig]):
         query: Optional[Dict[str, Any]] = None,
         headers: Optional[Dict[str, Union[str, Callable[[], str]]]] = None,
         response_type: Type[ResponseType],
-        next_url: Optional[Callable[[HttpCall], Optional[HttpUrl]]] = None,
+        next_page: Optional[Callable[[HttpCall], Optional[HttpUrl]]] = None,
         interval: Optional[int] = None,
     ) -> Callable[[Callable[[ResponseType], CdfTypes]], Callable[[ResponseType], CdfTypes]]:
         return self.endpoint(
@@ -159,7 +122,7 @@ class RestExtractor(Extractor[RestConfig]):
             headers=headers or {},
             body=None,
             response_type=response_type,
-            next_url=next_url,
+            next_page=next_page,
             interval=interval,
         )
 
@@ -171,7 +134,7 @@ class RestExtractor(Extractor[RestConfig]):
         headers: Optional[Dict[str, Union[str, Callable[[], str]]]] = None,
         body: Optional[RequestBodyTemplate],
         response_type: Type[ResponseType],
-        next_url: Optional[Callable[[HttpCall], Optional[HttpUrl]]] = None,
+        next_page: Optional[Callable[[HttpCall], Optional[HttpUrl]]] = None,
         interval: Optional[int] = None,
     ) -> Callable[[Callable[[ResponseType], CdfTypes]], Callable[[ResponseType], CdfTypes]]:
         return self.endpoint(
@@ -181,7 +144,7 @@ class RestExtractor(Extractor[RestConfig]):
             headers=headers or {},
             body=body,
             response_type=response_type,
-            next_url=next_url,
+            next_page=next_page,
             interval=interval,
         )
 
@@ -209,7 +172,7 @@ class RestExtractor(Extractor[RestConfig]):
         self.raw_queue.__exit__(exc_type, exc_val, exc_tb)
         return super(RestExtractor, self).__exit__(exc_type, exc_val, exc_tb)
 
-    def _handle_output(self, output: CdfTypes) -> None:
+    def handle_output(self, output: CdfTypes) -> None:
         if not isinstance(output, Iterable):
             output = [output]
 
@@ -226,7 +189,7 @@ class RestExtractor(Extractor[RestConfig]):
         else:
             raise ValueError(f"Unexpected type: {type(peek)}")
 
-    def _prepare_headers(self, endpoint: Endpoint) -> Dict[str, str]:
+    def prepare_headers(self, endpoint: Endpoint) -> Dict[str, str]:
         headers: Dict[str, str] = {k: _get_or_call(v) for k, v in self.headers.items()}
 
         for k, v in endpoint.headers.items():
@@ -249,16 +212,69 @@ class RestExtractor(Extractor[RestConfig]):
             raise ValueError("You must run the extractor in a context manager")
 
         for endpoint in self.endpoints:
-            url = urljoin(self.base_url, endpoint.path)
-            self.logger.info(f"{endpoint.method.value} {url}")
+            EndpointRunner(self, endpoint).run()
 
-            raw_response = requests.request(
-                method=endpoint.method.value,
-                url=url,
-                data=_format_body(endpoint.body),
-                headers=self._prepare_headers(endpoint),
-            )
-            data = raw_response.json()
-            response = dacite.from_dict(endpoint.response_type, data)
-            result = endpoint.implementation(response)
-            self._handle_output(result)
+
+class EndpointRunner:
+    def __init__(self, extractor: RestExtractor, endpoint: Endpoint):
+        self.extractor = extractor
+        self.endpoint = endpoint
+        self.logger = getLogger(__name__)
+
+        self.thread: Optional[threading.Thread] = None
+
+    def call(self, url: HttpUrl) -> HttpCall:
+        self.logger.info(f"{self.endpoint.method.value} {url}")
+
+        raw_response = requests.request(
+            method=self.endpoint.method.value,
+            url=str(url),
+            data=_format_body(self.endpoint.body),
+            headers=self.extractor.prepare_headers(self.endpoint),
+        )
+        data = raw_response.json()
+        response = dacite.from_dict(self.endpoint.response_type, data)
+        result = self.endpoint.implementation(response)
+        self.extractor.handle_output(result)
+
+        return HttpCall(url=url, response=response)
+
+    def _try_get_next_page(self, previous__call: HttpCall) -> Optional[HttpUrl]:
+        if self.endpoint.next_page is None:
+            return None
+        return self.endpoint.next_page(previous__call)
+
+    def exhaust_endpoint(self) -> None:
+        next_url = HttpUrl(urljoin(self.extractor.base_url, self.endpoint.path))
+
+        while next_url is not None:
+            call = self.call(next_url)
+            next_url = self._try_get_next_page(call)
+
+    def run(self) -> None:
+        self.exhaust_endpoint()
+
+
+T = TypeVar("T")
+
+
+def _get_or_call(item: Union[T, Callable[[], T]]) -> T:
+    return item() if callable(item) else item
+
+
+def _format_body(body: Optional[RequestBodyTemplate]) -> Optional[str]:
+    if body is None:
+        return None
+
+    def recursive_get_or_call(item: RequestBodyTemplate) -> RequestBody:
+        if isinstance(item, dict):
+            return {k: recursive_get_or_call(v) for k, v in item.items()}
+        elif isinstance(item, list):
+            return [recursive_get_or_call(i) for i in item]
+        else:
+            res = _get_or_call(item)
+            if isinstance(res, (list, dict)):
+                return recursive_get_or_call(res)
+            return res
+
+    return json.dumps(recursive_get_or_call(body))
