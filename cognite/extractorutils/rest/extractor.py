@@ -24,6 +24,7 @@ import requests
 from cognite.extractorutils.authentication import Authenticator, AuthenticatorConfig
 from cognite.extractorutils.base import Extractor
 from cognite.extractorutils.configtools import BaseConfig
+from cognite.extractorutils.throttle import throttled_loop
 from cognite.extractorutils.uploader import EventUploadQueue, RawUploadQueue, TimeSeriesUploadQueue
 from more_itertools import peekable
 
@@ -224,8 +225,15 @@ class RestExtractor(Extractor[RestConfig]):
         if not self.started:
             raise ValueError("You must run the extractor in a context manager")
 
+        runners = []
+
         for endpoint in self.endpoints:
-            EndpointRunner(self, endpoint).run()
+            runner = EndpointRunner(self, endpoint)
+            runner.run()
+            runners.append(runner)
+
+        for runner in runners:
+            runner.join()
 
 
 class EndpointRunner:
@@ -260,12 +268,26 @@ class EndpointRunner:
     def exhaust_endpoint(self) -> None:
         next_url = HttpUrl(urljoin(self.extractor.base_url, self.endpoint.path))
 
-        while next_url is not None:
+        while next_url is not None and not self.extractor.cancelation_token.is_set():
             call = self.call(next_url)
             next_url = self._try_get_next_page(call)
 
     def run(self) -> None:
-        self.exhaust_endpoint()
+        def loop() -> None:
+            for _ in throttled_loop(
+                target_time=self.endpoint.interval, cancelation_token=self.extractor.cancelation_token
+            ):
+                self.exhaust_endpoint()
+
+        self.thread = threading.Thread(
+            target=loop if self.endpoint.interval is not None else self.exhaust_endpoint,
+            name=f"EndpointRunner-{self.endpoint.path}",
+        )
+        self.thread.start()
+
+    def join(self) -> None:
+        if self.thread is not None:
+            self.thread.join()
 
 
 T = TypeVar("T")
