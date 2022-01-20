@@ -11,8 +11,8 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
-
-from typing import Iterable, Union
+from datetime import datetime
+from typing import Iterable, List, Optional, Tuple, Union
 
 from cognite.client.data_classes import Event as _Event
 from cognite.client.data_classes import Row as _Row
@@ -34,11 +34,22 @@ class RawRow:
             self.rows = [row]
 
 
+TimeStamp = Union[int, datetime]
+
+
+class InsertDatapoints:
+    def __init__(
+        self,
+        *,
+        id: Optional[int] = None,
+        external_id: Optional[str] = None,
+        datapoints: Union[List[Tuple[TimeStamp, float]], Tuple[TimeStamp, str]],
+    ):
+        self.id = id
+        self.external_id = external_id
+        self.datapoints = datapoints
+
+
 Event: TypeAlias = _Event
 
-CdfTypes = Union[
-    Event,
-    Iterable[Event],
-    RawRow,
-    Iterable[RawRow],
-]
+CdfTypes = Union[Event, Iterable[Event], RawRow, Iterable[RawRow], InsertDatapoints, Iterable[InsertDatapoints]]
