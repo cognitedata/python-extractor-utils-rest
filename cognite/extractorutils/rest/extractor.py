@@ -24,7 +24,7 @@ import requests
 from cognite.extractorutils.authentication import Authenticator, AuthenticatorConfig
 from cognite.extractorutils.base import Extractor
 from cognite.extractorutils.configtools import BaseConfig
-from cognite.extractorutils.uploader import EventUploadQueue, RawUploadQueue
+from cognite.extractorutils.uploader import EventUploadQueue, RawUploadQueue, TimeSeriesUploadQueue
 from more_itertools import peekable
 
 from cognite.extractorutils.rest.http import (
@@ -35,7 +35,7 @@ from cognite.extractorutils.rest.http import (
     RequestBodyTemplate,
     ResponseType,
 )
-from cognite.extractorutils.rest.types import CdfTypes, Event, RawRow
+from cognite.extractorutils.rest.types import CdfTypes, Event, InsertDatapoints, RawRow
 
 T = TypeVar("T")
 ResponseTypeGeneric = TypeVar("ResponseTypeGeneric")
@@ -199,6 +199,13 @@ class RestExtractor(Extractor[RestConfig]):
         self.raw_queue = RawUploadQueue(
             self.cognite_client, max_queue_size=100_000, max_upload_interval=60, trigger_log_level="INFO"
         ).__enter__()
+        self.time_series_queue = TimeSeriesUploadQueue(
+            self.cognite_client,
+            max_queue_size=1_000_000,
+            max_upload_interval=60,
+            trigger_log_level="INFO",
+            create_missing=True,
+        ).__enter__()
 
         return self
 
@@ -207,6 +214,7 @@ class RestExtractor(Extractor[RestConfig]):
     ) -> bool:
         self.event_queue.__exit__(exc_type, exc_val, exc_tb)
         self.raw_queue.__exit__(exc_type, exc_val, exc_tb)
+        self.time_series_queue.__exit__(exc_type, exc_val, exc_tb)
         return super(RestExtractor, self).__exit__(exc_type, exc_val, exc_tb)
 
     def _handle_output(self, output: CdfTypes) -> None:
@@ -223,6 +231,11 @@ class RestExtractor(Extractor[RestConfig]):
             for raw_row in peekable_output:
                 for row in raw_row.rows:
                     self.raw_queue.add_to_upload_queue(database=raw_row.db_name, table=raw_row.table_name, raw_row=row)
+        elif isinstance(peek, InsertDatapoints):
+            for datapoints in peekable_output:
+                self.time_series_queue.add_to_upload_queue(
+                    id=datapoints.id, external_id=datapoints.external_id, datapoints=datapoints.datapoints
+                )
         else:
             raise ValueError(f"Unexpected type: {type(peek)}")
 
