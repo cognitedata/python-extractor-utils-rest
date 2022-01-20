@@ -12,12 +12,15 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
+from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, Dict, Generic, List, TypeVar, Union
+from typing import Any, Callable, Dict, Generic, List, Optional, Type, TypeVar, Union
 from urllib.parse import urlparse
-from uuid import UUID
+from uuid import uuid4
 
 import arrow
+
+from cognite.extractorutils.rest.types import CdfTypes
 
 ResponseType = TypeVar("ResponseType")
 
@@ -45,13 +48,16 @@ class HttpUrl:
         self.scheme = parse_res.scheme
         self.netloc = parse_res.netloc
         self.path = parse_res.path
-        self.query = {k: v for k, v in [i.split("=") for i in parse_res.query.split("&")]}
+        if parse_res.query:
+            self.query = {k: v for k, v in [i.split("=") for i in parse_res.query.split("&")]}
+        else:
+            self.query = {}
         self.fragment = parse_res.fragment
 
     def __str__(self) -> str:
         query = f"?{'&'.join([f'{k}={v}' for k, v in self.query.items()])}" if self.query else ""
         fragment = f"#{self.fragment}" if self.fragment else ""
-        return f"{self.scheme}://{self.netloc}/{self.path}{query}{fragment}"
+        return f"{self.scheme}://{self.netloc}{self.path}{query}{fragment}"
 
     def __repr__(self) -> str:
         return self.__str__()
@@ -59,7 +65,20 @@ class HttpUrl:
 
 class HttpCall(Generic[ResponseType]):
     def __init__(self, url: HttpUrl, response: ResponseType):
-        self.uuid = UUID()
+        self.uuid = uuid4()
         self.url = url
         self.response = response
         self.time = arrow.get().float_timestamp
+
+
+@dataclass
+class Endpoint(Generic[ResponseType]):
+    implementation: Callable[[ResponseType], CdfTypes]
+    method: HttpMethod
+    path: str
+    query: Dict[str, Any]
+    headers: Dict[str, Union[str, Callable[[], str]]]
+    body: Optional[RequestBody]
+    response_type: Type[ResponseType]
+    next_page: Optional[Callable[[HttpCall], Optional[HttpUrl]]]
+    interval: Optional[int]
