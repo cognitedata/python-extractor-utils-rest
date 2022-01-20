@@ -233,7 +233,7 @@ class RestExtractor(Extractor[RestConfig]):
             runners.append(runner)
 
         for runner in runners:
-            runner.thread.join()
+            runner.join()
 
 
 class EndpointRunner:
@@ -272,7 +272,7 @@ class EndpointRunner:
             call = self.call(next_url)
             next_url = self._try_get_next_page(call)
 
-    def run(self):
+    def run(self) -> None:
         def loop() -> None:
             for _ in throttled_loop(
                 target_time=self.endpoint.interval, cancelation_token=self.extractor.cancelation_token
@@ -284,6 +284,10 @@ class EndpointRunner:
             name=f"EndpointRunner-{self.endpoint.path}",
         )
         self.thread.start()
+
+    def join(self) -> None:
+        if self.thread is not None:
+            self.thread.join()
 
 
 T = TypeVar("T")
