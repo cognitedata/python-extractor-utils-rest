@@ -14,3 +14,9 @@ cognite:
         secret: ${COGNITE_CLIENT_SECRET}
         scopes:
             - ${COGNITE_BASE_URL}/.default
+
+source:
+  auth:
+    basic:
+      username: user
+      password: pass
