@@ -21,13 +21,13 @@ from urllib.parse import urljoin
 
 import dacite
 import requests
-from cognite.extractorutils.authentication import Authenticator, AuthenticatorConfig
 from cognite.extractorutils.base import Extractor
 from cognite.extractorutils.configtools import BaseConfig
 from cognite.extractorutils.throttle import throttled_loop
 from cognite.extractorutils.uploader import EventUploadQueue, RawUploadQueue, TimeSeriesUploadQueue
 from more_itertools import peekable
 
+from cognite.extractorutils.rest.authentiaction import AuthConfig, AuthenticationProvider
 from cognite.extractorutils.rest.http import (
     Endpoint,
     HttpCall,
@@ -42,7 +42,7 @@ from cognite.extractorutils.rest.types import CdfTypes, Event, InsertDatapoints,
 
 @dataclass
 class SourceConfig:
-    idp_authentication: Optional[AuthenticatorConfig] = None
+    auth: Optional[AuthConfig] = None
     headers: Optional[Dict[str, str]] = None
 
 
@@ -77,8 +77,6 @@ class RestExtractor(Extractor[CustomRestConfig]):
         self.base_url = base_url or ""
         self.headers: Dict[str, Union[str, Callable[[], str]]] = headers or {}
         self.endpoints: List[Endpoint] = []
-
-        self.authenticator: Optional[Authenticator]
 
     def endpoint(
         self,
@@ -156,10 +154,7 @@ class RestExtractor(Extractor[CustomRestConfig]):
     def __enter__(self) -> "RestExtractor":
         super(RestExtractor, self).__enter__()
 
-        if self.config.source.idp_authentication:
-            self.authenticator = Authenticator(self.config.source.idp_authentication)
-        else:
-            self.authenticator = None
+        self.authentication = AuthenticationProvider(self.config.source.auth)
 
         self.event_queue = EventUploadQueue(
             self.cognite_client, max_queue_size=10_000, max_upload_interval=60, trigger_log_level="INFO"
@@ -217,8 +212,8 @@ class RestExtractor(Extractor[CustomRestConfig]):
             for k2, v2 in self.config.source.headers.items():
                 headers[k2] = v2
 
-        if self.authenticator:
-            headers["Authentication"] = f"Bearer {self.authenticator.get_token()}"
+        if self.authentication.is_configured:
+            headers["Authentication"] = self.authentication.auth_header
 
         if endpoint.body is not None:
             headers["Content-Type"] = "application/json"

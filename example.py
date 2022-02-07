@@ -12,7 +12,6 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-import os
 from dataclasses import dataclass
 from typing import Dict, Generator, List, Optional
 
@@ -50,7 +49,6 @@ extractor = RestExtractor(
     description="Testytesty",
     version="1.0.0",
     base_url="https://api.cognitedata.com/api/v1/projects/jetfiretest/",
-    headers={"api-key": os.environ["SOURCE_API_KEY"]},
 )
 
 
