@@ -51,7 +51,10 @@ class RestConfig(BaseConfig):
     source: SourceConfig = SourceConfig()
 
 
-class RestExtractor(Extractor[RestConfig]):
+CustomRestConfig = TypeVar("CustomRestConfig", bound=RestConfig)
+
+
+class RestExtractor(Extractor[CustomRestConfig]):
     def __init__(
         self,
         *,
@@ -61,6 +64,7 @@ class RestExtractor(Extractor[RestConfig]):
         base_url: Optional[str],
         headers: Optional[Dict[str, Union[str, Callable[[], str]]]] = None,
         cancelation_token: Event = threading.Event(),
+        config_class: Type[CustomRestConfig] = RestConfig,
     ):
         super(RestExtractor, self).__init__(
             name=name,
@@ -68,7 +72,7 @@ class RestExtractor(Extractor[RestConfig]):
             version=version,
             cancelation_token=cancelation_token,
             use_default_state_store=False,
-            config_class=RestConfig,
+            config_class=config_class,
         )
         self.base_url = base_url or ""
         self.headers: Dict[str, Union[str, Callable[[], str]]] = headers or {}
@@ -80,7 +84,7 @@ class RestExtractor(Extractor[RestConfig]):
         self,
         *,
         method: HttpMethod,
-        path: str,
+        path: Union[str, Callable[[], str]],
         query: Dict[str, Any],
         headers: Dict[str, Union[str, Callable[[], str]]],
         body: Optional[RequestBodyTemplate],
@@ -108,7 +112,7 @@ class RestExtractor(Extractor[RestConfig]):
 
     def get(
         self,
-        path: str,
+        path: Union[str, Callable[[], str]],
         *,
         query: Optional[Dict[str, Any]] = None,
         headers: Optional[Dict[str, Union[str, Callable[[], str]]]] = None,
@@ -129,7 +133,7 @@ class RestExtractor(Extractor[RestConfig]):
 
     def post(
         self,
-        path: str,
+        path: Union[str, Callable[[], str]],
         *,
         query: Optional[Dict[str, Any]] = None,
         headers: Optional[Dict[str, Union[str, Callable[[], str]]]] = None,
@@ -266,7 +270,12 @@ class EndpointRunner:
         return self.endpoint.next_page(previous__call)
 
     def exhaust_endpoint(self) -> None:
-        next_url = HttpUrl(urljoin(self.extractor.base_url, self.endpoint.path))
+        next_url = HttpUrl(
+            urljoin(
+                self.extractor.base_url,
+                self.endpoint.path() if callable(self.endpoint.path) else self.endpoint.path,
+            )
+        )
 
         while next_url is not None and not self.extractor.cancelation_token.is_set():
             call = self.call(next_url)
