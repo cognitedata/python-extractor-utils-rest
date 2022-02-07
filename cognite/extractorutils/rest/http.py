@@ -75,7 +75,7 @@ class HttpCall(Generic[ResponseType]):
 class Endpoint(Generic[ResponseType]):
     implementation: Callable[[ResponseType], CdfTypes]
     method: HttpMethod
-    path: str
+    path: Union[str, Callable[[], str]]
     query: Dict[str, Any]
     headers: Dict[str, Union[str, Callable[[], str]]]
     body: Optional[RequestBody]
