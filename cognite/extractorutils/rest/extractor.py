@@ -22,7 +22,7 @@ from urllib.parse import urljoin
 import dacite
 import requests
 from cognite.extractorutils.base import Extractor
-from cognite.extractorutils.configtools import BaseConfig
+from cognite.extractorutils.configtools import BaseConfig, StateStoreConfig
 from cognite.extractorutils.throttle import throttled_loop
 from cognite.extractorutils.uploader import EventUploadQueue, RawUploadQueue, TimeSeriesUploadQueue
 from more_itertools import peekable
@@ -47,8 +47,16 @@ class SourceConfig:
 
 
 @dataclass
+class ExtractorConfig:
+    max_upload_interval: int = 60
+    max_upload_queue_size: int = 1_000_000
+    state_store: StateStoreConfig = StateStoreConfig()
+
+
+@dataclass
 class RestConfig(BaseConfig):
     source: SourceConfig = SourceConfig()
+    extractor: ExtractorConfig = ExtractorConfig()
 
 
 CustomRestConfig = TypeVar("CustomRestConfig", bound=RestConfig)
@@ -158,15 +166,21 @@ class RestExtractor(Extractor[CustomRestConfig]):
         self.authentication = AuthenticationProvider(self.config.source.auth)
 
         self.event_queue = EventUploadQueue(
-            self.cognite_client, max_queue_size=10_000, max_upload_interval=60, trigger_log_level="INFO"
+            self.cognite_client,
+            max_queue_size=min(10_000, self.config.extractor.max_upload_queue_size),
+            max_upload_interval=self.config.extractor.max_upload_interval,
+            trigger_log_level="INFO",
         ).__enter__()
         self.raw_queue = RawUploadQueue(
-            self.cognite_client, max_queue_size=100_000, max_upload_interval=60, trigger_log_level="INFO"
+            self.cognite_client,
+            max_queue_size=min(100_000, self.config.extractor.max_upload_queue_size),
+            max_upload_interval=self.config.extractor.max_upload_interval,
+            trigger_log_level="INFO",
         ).__enter__()
         self.time_series_queue = TimeSeriesUploadQueue(
             self.cognite_client,
-            max_queue_size=1_000_000,
-            max_upload_interval=60,
+            max_queue_size=min(1_000_000, self.config.extractor.max_upload_queue_size),
+            max_upload_interval=self.config.extractor.max_upload_interval,
             trigger_log_level="INFO",
             create_missing=True,
             post_upload_function=self.state_store.post_upload_handler(),
