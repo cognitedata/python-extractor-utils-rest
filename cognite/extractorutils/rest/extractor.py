@@ -65,13 +65,14 @@ class RestExtractor(Extractor[CustomRestConfig]):
         headers: Optional[Dict[str, Union[str, Callable[[], str]]]] = None,
         cancelation_token: Event = threading.Event(),
         config_class: Type[CustomRestConfig] = RestConfig,
+        use_default_state_store: bool = True,
     ):
         super(RestExtractor, self).__init__(
             name=name,
             description=description,
             version=version,
             cancelation_token=cancelation_token,
-            use_default_state_store=False,
+            use_default_state_store=use_default_state_store,
             config_class=config_class,
         )
         self.base_url = base_url or ""
@@ -168,6 +169,7 @@ class RestExtractor(Extractor[CustomRestConfig]):
             max_upload_interval=60,
             trigger_log_level="INFO",
             create_missing=True,
+            post_upload_function=self.state_store.post_upload_handler(),
         ).__enter__()
 
         return self
