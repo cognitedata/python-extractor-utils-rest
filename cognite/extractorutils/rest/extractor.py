@@ -14,9 +14,10 @@
 import json
 import threading
 from dataclasses import dataclass
+from http import HTTPStatus
 from logging import getLogger
 from types import TracebackType
-from typing import Any, Callable, Dict, Iterable, List, Optional, Type, TypeVar, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Type, TypeVar, Union
 from urllib.parse import urljoin
 
 import dacite
@@ -25,7 +26,9 @@ from cognite.extractorutils.base import Extractor
 from cognite.extractorutils.configtools import BaseConfig, StateStoreConfig
 from cognite.extractorutils.throttle import throttled_loop
 from cognite.extractorutils.uploader import EventUploadQueue, RawUploadQueue, TimeSeriesUploadQueue
+from dacite import DaciteError
 from more_itertools import peekable
+from requests.exceptions import JSONDecodeError
 
 from cognite.extractorutils.rest.authentiaction import AuthConfig, AuthenticationProvider
 from cognite.extractorutils.rest.http import (
@@ -90,6 +93,7 @@ class RestExtractor(Extractor[CustomRestConfig]):
     def endpoint(
         self,
         *,
+        name: Optional[str] = None,
         method: HttpMethod,
         path: Union[str, Callable[[], str]],
         query: Dict[str, Any],
@@ -102,6 +106,7 @@ class RestExtractor(Extractor[CustomRestConfig]):
         def decorator(func: Callable[[ResponseType], CdfTypes]) -> Callable[[ResponseType], CdfTypes]:
             self.endpoints.append(
                 Endpoint(
+                    name=name,
                     implementation=func,
                     method=method,
                     path=path,
@@ -121,6 +126,7 @@ class RestExtractor(Extractor[CustomRestConfig]):
         self,
         path: Union[str, Callable[[], str]],
         *,
+        name: Optional[str] = None,
         query: Optional[Dict[str, Any]] = None,
         headers: Optional[Dict[str, Union[str, Callable[[], str]]]] = None,
         response_type: Type[ResponseType],
@@ -128,6 +134,7 @@ class RestExtractor(Extractor[CustomRestConfig]):
         interval: Optional[int] = None,
     ) -> Callable[[Callable[[ResponseType], CdfTypes]], Callable[[ResponseType], CdfTypes]]:
         return self.endpoint(
+            name=name,
             method=HttpMethod.GET,
             path=path,
             query=query or {},
@@ -142,6 +149,7 @@ class RestExtractor(Extractor[CustomRestConfig]):
         self,
         path: Union[str, Callable[[], str]],
         *,
+        name: Optional[str] = None,
         query: Optional[Dict[str, Any]] = None,
         headers: Optional[Dict[str, Union[str, Callable[[], str]]]] = None,
         body: Optional[RequestBodyTemplate],
@@ -150,6 +158,7 @@ class RestExtractor(Extractor[CustomRestConfig]):
         interval: Optional[int] = None,
     ) -> Callable[[Callable[[ResponseType], CdfTypes]], Callable[[ResponseType], CdfTypes]]:
         return self.endpoint(
+            name=name,
             method=HttpMethod.POST,
             path=path,
             query=query or {},
@@ -229,7 +238,7 @@ class RestExtractor(Extractor[CustomRestConfig]):
                 headers[k2] = v2
 
         if self.authentication.is_configured:
-            headers["Authentication"] = self.authentication.auth_header
+            headers["Authorization"] = self.authentication.auth_header
 
         if endpoint.body is not None:
             headers["Content-Type"] = "application/json"
@@ -252,12 +261,28 @@ class RestExtractor(Extractor[CustomRestConfig]):
 
 
 class EndpointRunner:
+    _threadnames: Set[str] = set()
+    _threadname_counter = 0
+    _threadname_lock = threading.RLock()
+
     def __init__(self, extractor: RestExtractor, endpoint: Endpoint):
         self.extractor = extractor
         self.endpoint = endpoint
         self.logger = getLogger(__name__)
 
         self.thread: Optional[threading.Thread] = None
+
+    def get_threadname(self) -> str:
+        with EndpointRunner._threadname_lock:
+            if self.endpoint.name:
+                name = self.endpoint.name
+                if name in EndpointRunner._threadnames:
+                    name += f"-{EndpointRunner._threadname_counter}"
+                    EndpointRunner._threadname_counter += 1
+            else:
+                name = EndpointRunner._threadname_counter
+                EndpointRunner._threadname_counter += 1
+        return name
 
     def call(self, url: HttpUrl) -> HttpCall:
         self.logger.info(f"{self.endpoint.method.value} {url}")
@@ -268,8 +293,17 @@ class EndpointRunner:
             data=_format_body(self.endpoint.body),
             headers=self.extractor.prepare_headers(self.endpoint),
         )
-        data = raw_response.json()
-        response = dacite.from_dict(self.endpoint.response_type, data)
+        if raw_response.status_code >= 400:
+            status = HTTPStatus(raw_response.status_code)
+            self.logger.error(f"Error from source. {raw_response.status_code}: {status.name} - {status.description}")
+
+        try:
+            data = raw_response.json()
+            response = dacite.from_dict(self.endpoint.response_type, data)
+        except (JSONDecodeError, DaciteError) as e:
+            self.logger.error(f"Error while parsing response: {str(e)}")
+            raise e
+
         result = self.endpoint.implementation(response)
         self.extractor.handle_output(result)
 
@@ -299,9 +333,11 @@ class EndpointRunner:
             ):
                 self.exhaust_endpoint()
 
+        threadname = self.get_threadname()
+
         self.thread = threading.Thread(
             target=loop if self.endpoint.interval is not None else self.exhaust_endpoint,
-            name=f"EndpointRunner-{self.endpoint.path}",
+            name=f"EndpointRunner-{threadname}",
         )
         self.thread.start()
 

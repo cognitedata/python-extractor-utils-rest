@@ -1,3 +1,4 @@
+import logging
 from base64 import b64encode
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -27,6 +28,7 @@ class AuthenticationProvider:
     def __init__(self, config: Optional[AuthConfig]):
         self.config = config
         self.authenticator: Optional[Authenticator] = None
+        self.logger = logging.getLogger()
 
         if self.config is not None:
             if _number_of_not_nones(self.config.oauth, self.config.basic) != 1:
@@ -45,6 +47,7 @@ class AuthenticationProvider:
             raise InvalidConfigError("No auth configured")
 
         if self.config.basic:
+            self.logger.info("Using basic auth")
             token = b64encode(f"{self.config.basic.username or ''}:{self.config.basic.password or ''}".encode("utf8"))
             return f"Basic {token.decode('utf8')}"
 
@@ -52,7 +55,7 @@ class AuthenticationProvider:
             if not self.authenticator:
                 # Will never happen, but to appease mypy
                 raise ValueError("Illegal stage: no authenticator when oauth2 is configured")
-
+            self.logger.info("Using OAuth2")
             return f"Bearer {self.authenticator.get_token()}"
 
         raise RuntimeError("Unexpected error: no auth config defined")

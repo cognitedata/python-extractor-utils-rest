@@ -73,6 +73,7 @@ class HttpCall(Generic[ResponseType]):
 
 @dataclass
 class Endpoint(Generic[ResponseType]):
+    name: Optional[str]
     implementation: Callable[[ResponseType], CdfTypes]
     method: HttpMethod
     path: Union[str, Callable[[], str]]
