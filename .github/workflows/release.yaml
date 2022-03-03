@@ -1,0 +1,42 @@
+name: release
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Set up Python
+      uses: actions/setup-python@v1
+      with:
+        python-version: 3.9
+
+    - name: Install dependencies
+      run: |
+        python3 -m pip install --upgrade pip poetry
+        poetry config virtualenvs.create false
+        poetry install
+
+    - name: Check codestyle
+      run: pre-commit run --all
+
+    - name: Run tests
+      env:
+        COGNITE_API_KEY: ${{ secrets.COGNITE_API_KEY }}
+        COGNITE_PROJECT: extractor-tests
+        COGNITE_BASE_URL: https://greenfield.cognitedata.com
+      run: bash run_tests.sh
+
+    - name: Build package
+      run: poetry build
+
+    - name: Release to PyPI
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+      run: twine upload --verbose dist/* || echo 'Version exists'
