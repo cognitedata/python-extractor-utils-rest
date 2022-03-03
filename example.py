@@ -16,9 +16,9 @@ from dataclasses import dataclass
 from typing import Dict, Generator, List, Optional
 
 from cognite.client.data_classes import Row
+from cognite.extractorutils.uploader_types import Event, RawRow
 
 from cognite.extractorutils.rest import RestExtractor
-from cognite.extractorutils.rest.types import Event, RawRow
 
 
 @dataclass

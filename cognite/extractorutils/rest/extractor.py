@@ -16,18 +16,16 @@ import threading
 from dataclasses import dataclass
 from http import HTTPStatus
 from logging import getLogger
-from types import TracebackType
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Type, TypeVar, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Type, TypeVar, Union
 from urllib.parse import urljoin
 
 import dacite
 import requests
-from cognite.extractorutils.base import Extractor
-from cognite.extractorutils.configtools import BaseConfig, StateStoreConfig
+from cognite.extractorutils.configtools import StateStoreConfig
 from cognite.extractorutils.throttle import throttled_loop
-from cognite.extractorutils.uploader import EventUploadQueue, RawUploadQueue, TimeSeriesUploadQueue
+from cognite.extractorutils.uploader_extractor import UploaderExtractor, UploaderExtractorConfig
+from cognite.extractorutils.uploader_types import CdfTypes
 from dacite import DaciteError
-from more_itertools import peekable
 from requests.exceptions import JSONDecodeError
 
 from cognite.extractorutils.rest.authentiaction import AuthConfig, AuthenticationProvider
@@ -40,7 +38,6 @@ from cognite.extractorutils.rest.http import (
     RequestBodyTemplate,
     ResponseType,
 )
-from cognite.extractorutils.rest.types import CdfTypes, Event, InsertDatapoints, RawRow
 
 
 @dataclass
@@ -51,13 +48,11 @@ class SourceConfig:
 
 @dataclass
 class ExtractorConfig:
-    max_upload_interval: int = 60
-    max_upload_queue_size: int = 1_000_000
     state_store: StateStoreConfig = StateStoreConfig()
 
 
 @dataclass
-class RestConfig(BaseConfig):
+class RestConfig(UploaderExtractorConfig):
     source: SourceConfig = SourceConfig()
     extractor: ExtractorConfig = ExtractorConfig()
 
@@ -65,7 +60,7 @@ class RestConfig(BaseConfig):
 CustomRestConfig = TypeVar("CustomRestConfig", bound=RestConfig)
 
 
-class RestExtractor(Extractor[CustomRestConfig]):
+class RestExtractor(UploaderExtractor[CustomRestConfig]):
     def __init__(
         self,
         *,
@@ -74,7 +69,7 @@ class RestExtractor(Extractor[CustomRestConfig]):
         version: Optional[str] = None,
         base_url: Optional[str],
         headers: Optional[Dict[str, Union[str, Callable[[], str]]]] = None,
-        cancelation_token: Event = threading.Event(),
+        cancelation_token: threading.Event = threading.Event(),
         config_class: Type[CustomRestConfig] = RestConfig,
         use_default_state_store: bool = True,
     ):
@@ -174,58 +169,7 @@ class RestExtractor(Extractor[CustomRestConfig]):
 
         self.authentication = AuthenticationProvider(self.config.source.auth)
 
-        self.event_queue = EventUploadQueue(
-            self.cognite_client,
-            max_queue_size=min(10_000, self.config.extractor.max_upload_queue_size),
-            max_upload_interval=self.config.extractor.max_upload_interval,
-            trigger_log_level="INFO",
-        ).__enter__()
-        self.raw_queue = RawUploadQueue(
-            self.cognite_client,
-            max_queue_size=min(100_000, self.config.extractor.max_upload_queue_size),
-            max_upload_interval=self.config.extractor.max_upload_interval,
-            trigger_log_level="INFO",
-        ).__enter__()
-        self.time_series_queue = TimeSeriesUploadQueue(
-            self.cognite_client,
-            max_queue_size=min(1_000_000, self.config.extractor.max_upload_queue_size),
-            max_upload_interval=self.config.extractor.max_upload_interval,
-            trigger_log_level="INFO",
-            create_missing=True,
-            post_upload_function=self.state_store.post_upload_handler(),
-        ).__enter__()
-
         return self
-
-    def __exit__(
-        self, exc_type: Optional[Type[BaseException]], exc_val: Optional[BaseException], exc_tb: Optional[TracebackType]
-    ) -> bool:
-        self.event_queue.__exit__(exc_type, exc_val, exc_tb)
-        self.raw_queue.__exit__(exc_type, exc_val, exc_tb)
-        self.time_series_queue.__exit__(exc_type, exc_val, exc_tb)
-        return super(RestExtractor, self).__exit__(exc_type, exc_val, exc_tb)
-
-    def handle_output(self, output: CdfTypes) -> None:
-        if not isinstance(output, Iterable):
-            output = [output]
-
-        peekable_output = peekable(output)
-        peek = peekable_output.peek()
-
-        if isinstance(peek, Event):
-            for event in peekable_output:
-                self.event_queue.add_to_upload_queue(event)
-        elif isinstance(peek, RawRow):
-            for raw_row in peekable_output:
-                for row in raw_row.rows:
-                    self.raw_queue.add_to_upload_queue(database=raw_row.db_name, table=raw_row.table_name, raw_row=row)
-        elif isinstance(peek, InsertDatapoints):
-            for datapoints in peekable_output:
-                self.time_series_queue.add_to_upload_queue(
-                    id=datapoints.id, external_id=datapoints.external_id, datapoints=datapoints.datapoints
-                )
-        else:
-            raise ValueError(f"Unexpected type: {type(peek)}")
 
     def prepare_headers(self, endpoint: Endpoint) -> Dict[str, str]:
         headers: Dict[str, str] = {k: _get_or_call(v) for k, v in self.headers.items()}

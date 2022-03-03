@@ -19,8 +19,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 import arrow
-
-from cognite.extractorutils.rest.types import CdfTypes
+from cognite.extractorutils.uploader_types import CdfTypes
 
 ResponseType = TypeVar("ResponseType")
 
