@@ -42,6 +42,7 @@ from cognite.extractorutils.rest.http import (
 
 @dataclass
 class SourceConfig:
+    base_url: Optional[str] = None
     auth: Optional[AuthConfig] = None
     headers: Optional[Dict[str, str]] = None
 
@@ -67,7 +68,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         name: str,
         description: str,
         version: Optional[str] = None,
-        base_url: Optional[str],
+        base_url: Optional[str] = None,
         headers: Optional[Dict[str, Union[str, Callable[[], str]]]] = None,
         cancelation_token: threading.Event = threading.Event(),
         config_class: Type[CustomRestConfig] = RestConfig,
@@ -81,7 +82,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
             use_default_state_store=use_default_state_store,
             config_class=config_class,
         )
-        self.base_url = base_url or ""
+        self._default_base_url = base_url or ""
         self.headers: Dict[str, Union[str, Callable[[], str]]] = headers or {}
         self.endpoints: List[Endpoint] = []
 
@@ -168,6 +169,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         super(RestExtractor, self).__enter__()
 
         self.authentication = AuthenticationProvider(self.config.source.auth)
+        self.base_url = self.config.source.base_url or self._default_base_url
 
         return self
 
