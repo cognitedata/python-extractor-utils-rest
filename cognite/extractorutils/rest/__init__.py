@@ -12,7 +12,7 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-__all__ = ["http", "types", "RestExtractor"]
+__all__ = ["http", "RestExtractor"]
 
-from . import http, types
+from . import http
 from .extractor import RestExtractor
