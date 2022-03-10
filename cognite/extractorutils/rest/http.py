@@ -42,6 +42,16 @@ class HttpMethod(Enum):
 
 
 class HttpUrl:
+    """
+    Class representing an HTTP URL
+
+    Every part of the URL is stored as separate parameters, such as ``scheme``, ``path``, ``query``, etc. Unlike urllib,
+    the query is stored as a dictionary with each key separate, allowing easier modifications.
+
+    Args:
+        url: a complete string representation of the URL
+    """
+
     def __init__(self, url: str):
         parse_res = urlparse(url)
         self.scheme = parse_res.scheme
@@ -54,15 +64,26 @@ class HttpUrl:
         self.fragment = parse_res.fragment
 
     def __str__(self) -> str:
+        """
+        Get a string representation of the URL, ready to be passed to the ``requests`` library.
+        """
         query = f"?{'&'.join([f'{k}={v}' for k, v in self.query.items()])}" if self.query else ""
         fragment = f"#{self.fragment}" if self.fragment else ""
         return f"{self.scheme}://{self.netloc}{self.path}{query}{fragment}"
 
     def __repr__(self) -> str:
+        """
+        Get a string representation of the URL, ready to be passed to the ``requests`` library.
+        """
         return self.__str__()
 
 
 class HttpCall(Generic[ResponseType]):
+    """
+    A complete representation of an HTTP call, containing the URL called, the response received, and an ID and timestamp
+    for the request.
+    """
+
     def __init__(self, url: HttpUrl, response: ResponseType):
         self.uuid = uuid4()
         self.url = url
