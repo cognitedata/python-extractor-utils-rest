@@ -22,11 +22,13 @@ from urllib.parse import urljoin
 import dacite
 import requests
 from cognite.extractorutils.configtools import StateStoreConfig
+from cognite.extractorutils.retry import retry
 from cognite.extractorutils.throttle import throttled_loop
 from cognite.extractorutils.uploader_extractor import UploaderExtractor, UploaderExtractorConfig
 from cognite.extractorutils.uploader_types import CdfTypes
 from dacite import DaciteError
-from requests.exceptions import JSONDecodeError
+from requests import Response
+from requests.exceptions import HTTPError, JSONDecodeError
 
 from cognite.extractorutils.rest.authentiaction import AuthConfig, AuthenticationProvider
 from cognite.extractorutils.rest.http import (
@@ -41,10 +43,21 @@ from cognite.extractorutils.rest.http import (
 
 
 @dataclass
+class RetryConfig:
+    backoff_factor: float = 1.5
+    max_delay: float = 60
+    delay: float = 5
+    number: int = 5
+    jitter: float = 1
+
+
+@dataclass
 class SourceConfig:
     base_url: Optional[str] = None
     auth: Optional[AuthConfig] = None
     headers: Optional[Dict[str, str]] = None
+
+    retries: RetryConfig = RetryConfig()
 
 
 @dataclass
@@ -196,14 +209,22 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
             raise ValueError("You must run the extractor in a context manager")
 
         runners = []
-
         for endpoint in self.endpoints:
             runner = EndpointRunner(self, endpoint)
             runner.run()
             runners.append(runner)
 
+        errors = []
         for runner in runners:
             runner.join()
+            if runner.error:
+                errors.append(runner)
+
+        if errors:
+            # Raise exception to finish uncleanly, and report a failed run
+            raise RuntimeError(
+                ", ".join([f"Error in thread '{runner.threadname}': {str(runner.error)}" for runner in errors])
+            )
 
 
 class EndpointRunner:
@@ -217,6 +238,9 @@ class EndpointRunner:
         self.logger = getLogger(__name__)
 
         self.thread: Optional[threading.Thread] = None
+        self.threadname: Optional[str] = None
+
+        self.error: Optional[Exception] = None
 
     def get_threadname(self) -> str:
         with EndpointRunner._threadname_lock:
@@ -233,44 +257,63 @@ class EndpointRunner:
     def call(self, url: HttpUrl) -> HttpCall:
         self.logger.info(f"{self.endpoint.method.value} {url}")
 
-        raw_response = requests.request(
-            method=self.endpoint.method.value,
-            url=str(url),
-            data=_format_body(self.endpoint.body),
-            headers=self.extractor.prepare_headers(self.endpoint),
+        @retry(
+            cancelation_token=self.extractor.cancelation_token,
+            exceptions=[HTTPError],
+            max_delay=self.extractor.config.source.retries.max_delay,
+            backoff=self.extractor.config.source.retries.backoff_factor,
+            jitter=(0, self.extractor.config.source.retries.jitter),
+            tries=self.extractor.config.source.retries.number,
+            delay=self.extractor.config.source.retries.delay,
         )
-        if raw_response.status_code >= 400:
-            status = HTTPStatus(raw_response.status_code)
-            self.logger.error(f"Error from source. {raw_response.status_code}: {status.name} - {status.description}")
+        def _call() -> Response:
+            resp = requests.request(
+                method=self.endpoint.method.value,
+                url=str(url),
+                data=_format_body(self.endpoint.body),
+                headers=self.extractor.prepare_headers(self.endpoint),
+            )
+            status = HTTPStatus(resp.status_code)
+            self.logger.debug(f"Response {resp.status_code}: {status.name} {status.description} - {resp.reason}")
+            resp.raise_for_status()
+            return resp
+
+        raw_response = _call()
 
         try:
             data = raw_response.json()
             response = dacite.from_dict(self.endpoint.response_type, data)
+
+            result = self.endpoint.implementation(response)
+            self.extractor.handle_output(result)
         except (JSONDecodeError, DaciteError) as e:
             self.logger.error(f"Error while parsing response: {str(e)}")
             raise e
 
-        result = self.endpoint.implementation(response)
-        self.extractor.handle_output(result)
-
         return HttpCall(url=url, response=response)
 
-    def _try_get_next_page(self, previous__call: HttpCall) -> Optional[HttpUrl]:
+    def _try_get_next_page(self, previous_call: HttpCall) -> Optional[HttpUrl]:
         if self.endpoint.next_page is None:
             return None
-        return self.endpoint.next_page(previous__call)
+        return self.endpoint.next_page(previous_call)
 
     def exhaust_endpoint(self) -> None:
-        next_url = HttpUrl(
-            urljoin(
-                self.extractor.base_url,
-                self.endpoint.path() if callable(self.endpoint.path) else self.endpoint.path,
+        try:
+            next_url = HttpUrl(
+                urljoin(
+                    self.extractor.base_url,
+                    self.endpoint.path() if callable(self.endpoint.path) else self.endpoint.path,
+                )
             )
-        )
 
-        while next_url is not None and not self.extractor.cancelation_token.is_set():
-            call = self.call(next_url)
-            next_url = self._try_get_next_page(call)
+            while next_url is not None and not self.extractor.cancelation_token.is_set():
+                call = self.call(next_url)
+                next_url = self._try_get_next_page(call)
+
+        except Exception as e:
+            # Store exception details, so we can fetch them from the Extractor class later
+            self.error = e
+            raise e
 
     def run(self) -> None:
         def loop() -> None:
@@ -279,11 +322,11 @@ class EndpointRunner:
             ):
                 self.exhaust_endpoint()
 
-        threadname = self.get_threadname()
+        self.threadname = self.get_threadname()
 
         self.thread = threading.Thread(
             target=loop if self.endpoint.interval is not None else self.exhaust_endpoint,
-            name=f"EndpointRunner-{threadname}",
+            name=f"EndpointRunner-{self.threadname}",
         )
         self.thread.start()
 
