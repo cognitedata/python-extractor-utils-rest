@@ -25,6 +25,26 @@ def _number_of_not_nones(*args: Any) -> int:
 
 
 class AuthenticationProvider:
+    """
+    A general provider of auth headers. Given the AuthConfig provided, it will give an appropriate header value for
+    requests.
+
+    Typical usage:
+
+    .. code-block:: python
+
+        authentication_provider: AuthenticationProvider
+
+        if authentication_provider.is_configured:
+            headers["Authorization"] = authentication_provider.auth_header
+
+    Args:
+        config: authentication configuration. Contains username/password for basic auth, client credentials for an
+            oauth2 flow, etc. If None, the AuthenticationProvider will be 'unconfigured' (see the ``is_configured``
+            property)
+
+    """
+
     def __init__(self, config: Optional[AuthConfig]):
         self.config = config
         self.authenticator: Optional[Authenticator] = None
@@ -39,10 +59,26 @@ class AuthenticationProvider:
 
     @property
     def is_configured(self) -> bool:
+        """
+        Check whether the AuthenticationProvider is configured or not (ie, whether the provided config contains any
+        auth schemas or not).
+
+        Returns:
+            true if the provider is configured, false if not.
+        """
         return self.config is not None
 
     @property
     def auth_header(self) -> str:
+        """
+        Get auth header value.
+
+        Returns:
+            A string containing an auth header.
+
+        Raises:
+            InvalidConfigError: If no auth is configured.
+        """
         if self.config is None:
             raise InvalidConfigError("No auth configured")
 
