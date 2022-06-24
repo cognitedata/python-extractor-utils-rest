@@ -78,6 +78,45 @@ with extractor:
 
 A full example is provided in the [`example.py`](./example.py) file.
 
+### Lists at the root or nested lists
+Using Python dataclasses we're not able to express JSON structures where the root element 
+is a list, or JSON structures containing nested lists. To get around this, and responses of this nature
+will be automatically converted to something that can be modeled with Python dataclasses. 
+
+A JSON structure containig a list as it's root element will be converted to an object containing a single key, "items", which 
+has the original JSON list, as it's value as in the example below.
+
+```
+[{"object_id": 1}, {"object_id": 2}, {"object_id": 3}]
+```
+
+will be converted to 
+
+```
+{
+    "items": [{"object_id": 1}, {"object_id": 2}, {"object_id": 3}]
+}
+```
+
+A JSON structure containing nested lists, will have the inner list converted to an object containing a single key, "items", which has the original inner list as it's value, as in the example below. 
+
+```
+{
+    "nested_list": [
+        [{"object_id": 1}, {"object_id": 2}, {"object_id": 3}],
+        [{"object_id": 4}, {"object_id": 5}, {"object_id": 6}]
+    ]
+}
+```
+will be converted to
+```
+{
+    "nested_list": [
+        {"items": [{"object_id": 1}, {"object_id": 2}, {"object_id": 3}]},
+        {"items": [{"object_id": 4}, {"object_id": 5}, {"object_id": 6}]}        
+    ]
+}
+```
 
 ## Contributing
 
