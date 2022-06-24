@@ -370,6 +370,7 @@ class EndpointRunner:
 
         try:
             data = raw_response.json()
+            data = _incompatible_lists_to_dict(data)
             response = dacite.from_dict(self.endpoint.response_type, data)
 
             result = self.endpoint.implementation(response)
@@ -459,3 +460,19 @@ def _format_body(body: Optional[RequestBodyTemplate]) -> Optional[str]:
             return res
 
     return json.dumps(recursive_get_or_call(body))
+
+
+def _incompatible_lists_to_dict(data: Any) -> Dict:
+    return _incompatible_lists_to_dict_recursive(data)
+
+
+def _incompatible_lists_to_dict_recursive(data: Any, parent: Any = None) -> Any:
+    if isinstance(data, list):
+        if isinstance(parent, dict):
+            return [_incompatible_lists_to_dict_recursive(v, data) for v in data]
+        else:
+            return {"items": [_incompatible_lists_to_dict_recursive(v, data) for v in data]}
+    elif isinstance(data, dict):
+        return {k: _incompatible_lists_to_dict_recursive(v, data) for k, v in data.items()}
+    else:
+        return data

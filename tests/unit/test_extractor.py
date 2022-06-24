@@ -14,7 +14,7 @@
 
 import unittest
 
-from cognite.extractorutils.rest.extractor import _format_body, _get_or_call
+from cognite.extractorutils.rest.extractor import _format_body, _get_or_call, _incompatible_lists_to_dict
 
 
 class Iterator:
@@ -72,6 +72,37 @@ class TestGetOrCall(unittest.TestCase):
         self.assertEqual(_get_or_call(lambda: 42), 42)
         self.assertEqual(_get_or_call(lambda: 1 + 2 + 3), 6)
         self.assertEqual(_get_or_call(lambda: "hey"), "hey")
+
+
+class TestIncompatibleListsToDict(unittest.TestCase):
+    def test_plain_dict(self) -> None:
+        self.assertEqual(
+            _incompatible_lists_to_dict({"key1": "val1", "key2": "val2", "key3": "val3"}),
+            {"key1": "val1", "key2": "val2", "key3": "val3"},
+        )
+
+    def test_nested_dict(self) -> None:
+        self.assertEqual(
+            _incompatible_lists_to_dict({"key": {"inner_key": "inner_val"}}), {"key": {"inner_key": "inner_val"}}
+        )
+
+    def test_simple_list(self) -> None:
+        self.assertEqual(
+            _incompatible_lists_to_dict([{"key1": "val1"}, {"key2": "val2"}, {"key3": "val3"}]),
+            {"items": [{"key1": "val1"}, {"key2": "val2"}, {"key3": "val3"}]},
+        )
+
+    def test_nested_list(self) -> None:
+        self.assertEqual(
+            _incompatible_lists_to_dict([[{"key1": "val1"}, {"key2": "val2"}], [{"key3": "val3"}]]),
+            {"items": [{"items": [{"key1": "val1"}, {"key2": "val2"}]}, {"items": [{"key3": "val3"}]}]},
+        )
+
+    def test_nested_list_within_dict(self) -> None:
+        self.assertEqual(
+            _incompatible_lists_to_dict({"key": [[{"key1": "val1"}, {"key2": "val2"}]]}),
+            {"key": [{"items": [{"key1": "val1"}, {"key2": "val2"}]}]},
+        )
 
 
 if __name__ == "__main__":
