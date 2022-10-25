@@ -370,6 +370,10 @@ class EndpointRunner:
 
         try:
             data = raw_response.json()
+
+            if isinstance(data, list):
+                data = {"items": data}
+
             response = dacite.from_dict(self.endpoint.response_type, data)
 
             result = self.endpoint.implementation(response)

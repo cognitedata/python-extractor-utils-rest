@@ -78,6 +78,23 @@ with extractor:
 
 A full example is provided in the [`example.py`](./example.py) file.
 
+### Lists at the root
+Using Python dataclasses we're not able to express JSON structures where the root element 
+is a list. To get around that responses of this nature will be automatically converted to something which can be modeled with Python dataclasses. 
+
+A JSON structure containing a list as it's root element will be converted to an object containing a single key, "items", which has the original JSON list as it's value, as in the example below.
+
+```
+[{"object_id": 1}, {"object_id": 2}, {"object_id": 3}]
+```
+
+will be converted to 
+
+```
+{
+    "items": [{"object_id": 1}, {"object_id": 2}, {"object_id": 3}]
+}
+```
 
 ## Contributing
 
