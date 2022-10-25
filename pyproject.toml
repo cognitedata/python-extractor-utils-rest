@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "cognite-extractor-utils-rest"
-version = "0.1.0"
+version = "0.2.0"
 description = "REST extention for the Cognite extractor-utils framework"
 authors = ["Mathias Lohne <mathias.lohne@cognite.com>"]
 license = "Apache-2.0"
@@ -13,7 +13,7 @@ packages = [
 
 [tool.black]
 line-length = 120
-target_version = ['py37']
+target_version = ['py38']
 include = '\.py$'
 
 [tool.isort]
@@ -24,8 +24,8 @@ skip_glob = '^((?!py$).)*$'    # this makes sort all Python files
 known_third_party = ["arrow", "dacite", "requests"]
 
 [tool.poetry.dependencies]
-python = ">=3.7,<3.11"
-cognite-extractor-utils = "^2.1.2"
+python = ">=3.8,<3.11"
+cognite-extractor-utils = "^3.0.2"
 requests = "^2.27.0"
 
 [tool.poetry.dev-dependencies]
@@ -37,7 +37,7 @@ pytest = "^6.2.5"
 pytest-cov = "^2.8.1"
 sphinx = "^4.2.0"
 sphinx-rtd-theme = "^1.0.0"
-pre-commit = "^2.2.0"
+pre-commit = "^2.19.0"
 types-requests = "^2.26.0"
 twine = "^3.8.0"
 
