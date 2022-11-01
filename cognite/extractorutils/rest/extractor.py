@@ -155,6 +155,45 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
 
         return decorator
 
+    def endpoint_list(
+        self,
+        *,
+        name: Optional[str] = None,
+        method: HttpMethod,
+        paths: List[Union[str, Callable[[], str]]],
+        query: Dict[str, Any],
+        headers: Dict[str, Union[str, Callable[[], str]]],
+        body: Optional[RequestBodyTemplate],
+        response_type: Type[ResponseType],
+        next_page: Optional[Callable[[HttpCall], Optional[HttpUrl]]],
+        interval: Optional[int],
+    ) -> Callable[[Callable[[ResponseType], CdfTypes]], Callable[[ResponseType], CdfTypes]]:
+        """
+        A generic endpoint decorator. Not meant to be used directly, use ``get`` or ``post`` instead.
+        """
+
+        def decorator(func: Callable[[ResponseType], CdfTypes]) -> Callable[[ResponseType], CdfTypes]:
+            endpoints = []
+            for path in paths:
+                endpoints.append(
+                    Endpoint(
+                        name=name,
+                        implementation=func,
+                        method=method,
+                        path=path,
+                        query=query,
+                        headers=headers,
+                        body=body,
+                        response_type=response_type,
+                        next_page=next_page,
+                        interval=interval,
+                    )
+                )
+            self.endpoints.extend(endpoints)
+            return func
+
+        return decorator
+
     def get(
         self,
         path: Union[str, Callable[[], str]],
@@ -227,6 +266,43 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
             query=query or {},
             headers=headers or {},
             body=body,
+            response_type=response_type,
+            next_page=next_page,
+            interval=interval,
+        )
+
+    def get_multiple(
+        self,
+        paths: List[Union[str, Callable[[], str]]],
+        *,
+        name: Optional[str] = None,
+        query: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, Union[str, Callable[[], str]]]] = None,
+        response_type: Type[ResponseType],
+        next_page: Optional[Callable[[HttpCall], Optional[HttpUrl]]] = None,
+        interval: Optional[int] = None,
+    ) -> Callable[[Callable[[ResponseType], CdfTypes]], Callable[[ResponseType], CdfTypes]]:
+        """
+        Perform a GET request and give the result to the decorated function. The output of the decorated function will
+        be handled and uploaded to CDF.
+
+        Args:
+            paths: List of relative (if a base URL was given) or absolute (of no base URL) paths to make request to
+            name: A readable name for this request, used in logging.
+            query: Query parameters. Values can either be values or callables giving values.
+            headers: Headers. Values can either be values or callables giving values.
+            response_type: Class to deserialize response JSON into
+            next_page: A callable taking an HttpCall and returning the next HttpUrl to make a request to.
+            interval: A target iteration time. If given, the extractor will make periodic requests instead of a single
+                request.
+        """
+        return self.endpoint_list(
+            name=name,
+            method=HttpMethod.GET,
+            paths=paths,
+            query=query or {},
+            headers=headers or {},
+            body=None,
             response_type=response_type,
             next_page=next_page,
             interval=interval,
