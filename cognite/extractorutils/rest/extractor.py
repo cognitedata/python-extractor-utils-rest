@@ -423,7 +423,7 @@ class EndpointRunner:
 
         @retry(
             cancelation_token=self.extractor.cancelation_token,
-            exceptions=[HTTPError],
+            exceptions=(HTTPError),
             max_delay=self.extractor.config.source.retries.max_delay,
             backoff=self.extractor.config.source.retries.backoff_factor,
             jitter=(0, self.extractor.config.source.retries.jitter),
