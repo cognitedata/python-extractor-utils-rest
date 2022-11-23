@@ -63,6 +63,11 @@ class HttpUrl:
             self.query = {}
         self.fragment = parse_res.fragment
 
+    def add_to_query(self, query: Optional[Dict[str, Any]]) -> None:
+        if query is not None:
+            for k, v in query.items():
+                self.query[k] = str(v)
+
     def __str__(self) -> str:
         """
         Get a string representation of the URL, ready to be passed to the ``requests`` library.
