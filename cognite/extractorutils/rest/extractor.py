@@ -420,6 +420,7 @@ class EndpointRunner:
 
     def _call(self, url: HttpUrl) -> HttpCall:
         self.logger.info(f"{self.endpoint.method.value} {url}")
+        url.add_to_query(self.endpoint.query)
 
         @retry(
             cancelation_token=self.extractor.cancelation_token,
