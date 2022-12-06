@@ -13,18 +13,19 @@
 #  limitations under the License.
 import json
 import threading
-from dataclasses import dataclass
+import time
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from http import HTTPStatus
-from logging import getLogger
+from queue import Empty, PriorityQueue
 from types import TracebackType
-from typing import Any, Callable, Dict, List, Optional, Set, Type, TypeVar, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Union
 from urllib.parse import urljoin
 
 import dacite
 import requests
 from cognite.extractorutils.configtools import StateStoreConfig
 from cognite.extractorutils.retry import retry
-from cognite.extractorutils.throttle import throttled_loop
 from cognite.extractorutils.uploader_extractor import UploaderExtractor, UploaderExtractorConfig
 from cognite.extractorutils.uploader_types import CdfTypes
 from dacite import DaciteError
@@ -72,6 +73,20 @@ class RestConfig(UploaderExtractorConfig):
     extractor: ExtractorConfig = ExtractorConfig()
 
 
+@dataclass
+class HttpEndpointCall:
+    endpoint: Endpoint
+    url: HttpUrl
+    # When this endpoint should next be called
+    call_when: float
+
+
+@dataclass(order=True)
+class PrioritizedEndpointCall:
+    priority: float
+    call: HttpEndpointCall = field(compare=False)
+
+
 CustomRestConfig = TypeVar("CustomRestConfig", bound=RestConfig)
 
 
@@ -93,6 +108,8 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
             a NoStateStore will be created in its place.
         cancelation_token: An event that will be set when the extractor should shut down, an empty one will be created
             if omitted.
+        config_file_path: Optional override to configuration file path
+        num_parallel_requests: Maximum number of requests to execute in parallel. Must be greater than 0.
     """
 
     def __init__(
@@ -106,6 +123,8 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         cancelation_token: threading.Event = threading.Event(),
         config_class: Type[CustomRestConfig] = RestConfig,
         use_default_state_store: bool = True,
+        config_file_path: Optional[str] = None,
+        num_parallel_requests: int = 10
     ):
         super(RestExtractor, self).__init__(
             name=name,
@@ -114,10 +133,17 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
             cancelation_token=cancelation_token,
             use_default_state_store=use_default_state_store,
             config_class=config_class,
+            config_file_path=config_file_path,
         )
         self._default_base_url = base_url or ""
         self.headers: Dict[str, Union[str, Callable[[], str]]] = headers or {}
         self.endpoints: List[Endpoint] = []
+        self.call_queue: PriorityQueue[PrioritizedEndpointCall] = PriorityQueue()
+        self.n_executing = 0
+        self._min_check_interval = 1
+        if num_parallel_requests <= 0:
+            raise ValueError("num_parallel_requests must be a number greater than 0")
+        self.num_parallel_requests = num_parallel_requests
 
     def endpoint(
         self,
@@ -354,6 +380,38 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
 
         return headers
 
+    def _get_next_call(self) -> Optional[HttpEndpointCall]:
+        waiting: Optional[PrioritizedEndpointCall] = None
+        while not self.cancelation_token.is_set():
+            # If n_executing is set to 0, and the queue is empty here, then we are done
+            # This is race condition prone in theory, but it should work. n_executing is
+            # only decremented after giving the call a chance to add to the call queue, so
+            # either the call is unfinished, and n_executing is > 0, or the queue length is
+            # accurate.
+            if self.n_executing == 0 and self.call_queue.empty():
+                return waiting.call if waiting is not None else None
+            to_wait = (
+                self._min_check_interval
+                if waiting is None
+                else min(self._min_check_interval, waiting.call.call_when - time.time())
+            )
+            if waiting is not None and to_wait <= 0:
+                return waiting.call
+            try:
+                next: PrioritizedEndpointCall = self.call_queue.get(block=True, timeout=to_wait)
+            except Empty:
+                continue
+
+            if waiting is not None and next.call.call_when < waiting.call.call_when:
+                self.call_queue.put(waiting)
+                waiting = next
+            elif waiting is None:
+                waiting = next
+            else:
+                time.sleep(to_wait)
+
+        return None
+
     def run(self) -> None:
         """
         Run extractor.
@@ -364,79 +422,68 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         if not self.started:
             raise ValueError("You must run the extractor in a context manager")
 
-        runners = []
         for endpoint in self.endpoints:
-            runner = EndpointRunner(self, endpoint)
-            runner.run()
-            runners.append(runner)
+            call = HttpEndpointCall(endpoint=endpoint, url=_get_initial_url(self.base_url, endpoint), call_when=0)
+            self.call_queue.put(PrioritizedEndpointCall(priority=call.call_when, call=call))
 
-        errors = []
-        for runner in runners:
-            runner.join()
-            if runner.error:
-                errors.append(runner)
+        lock = threading.Lock()
+
+        errors: List[Tuple[Exception, HttpEndpointCall]] = []
+
+        def executor_call(endpoint: HttpEndpointCall) -> None:
+            try:
+                resp = self._call(endpoint)
+                self._handle_call_response(endpoint.endpoint, resp)
+            except Exception as e:
+                errors.append((e, endpoint))
+            with lock:
+                self.n_executing -= 1
+
+        with ThreadPoolExecutor(max_workers=self.num_parallel_requests) as executor:
+
+            def producer_loop() -> None:
+                try:
+                    while not self.cancelation_token.is_set():
+                        next = self._get_next_call()
+                        if next is None:
+                            break
+                        with lock:
+                            self.n_executing += 1
+                        executor.submit(executor_call, next)
+                except Exception as e:
+                    self.logger.error(f"Failure in call producer thread: {str(e)}")
+
+            producer_thread = threading.Thread(name="Producer", target=producer_loop)
+            producer_thread.start()
+            producer_thread.join()
 
         if errors:
             # Raise exception to finish uncleanly, and report a failed run
             raise RuntimeError(
-                ", ".join([f"Error in thread '{runner.threadname}': {str(runner.error)}" for runner in errors])
+                ", ".join(
+                    [f"Error in endpoint '{endpoint.endpoint.name}': {str(error)}" for (error, endpoint) in errors]
+                )
             )
 
-
-class EndpointRunner:
-    """
-    A runner class that takes an Endpoint object, and executes all the necessary HTTP requests for that endpoint.
-
-    Args:
-         extractor: The extractor class instantiating the runner.
-         endpoint: The endpoint to run against
-    """
-
-    _threadnames: Set[str] = set()
-    _threadname_counter = 0
-    _threadname_lock = threading.RLock()
-
-    def __init__(self, extractor: RestExtractor, endpoint: Endpoint):
-        self.extractor = extractor
-        self.endpoint = endpoint
-        self.logger = getLogger(__name__)
-
-        self.thread: Optional[threading.Thread] = None
-        self.threadname: Optional[str] = None
-
-        self.error: Optional[Exception] = None
-
-    def _get_threadname(self) -> str:
-        with EndpointRunner._threadname_lock:
-            if self.endpoint.name:
-                name = self.endpoint.name
-                if name in EndpointRunner._threadnames:
-                    name += f"-{EndpointRunner._threadname_counter}"
-                    EndpointRunner._threadname_counter += 1
-            else:
-                name = EndpointRunner._threadname_counter
-                EndpointRunner._threadname_counter += 1
-        return name
-
-    def _call(self, url: HttpUrl) -> HttpCall:
-        self.logger.info(f"{self.endpoint.method.value} {url}")
-        url.add_to_query(self.endpoint.query)
+    def _call(self, endpoint: HttpEndpointCall) -> HttpCall:
+        self.logger.info(f"{endpoint.endpoint.method.value} {endpoint.url}")
+        endpoint.url.add_to_query(endpoint.endpoint.query)
 
         @retry(
-            cancelation_token=self.extractor.cancelation_token,
+            cancelation_token=self.cancelation_token,
             exceptions=(HTTPError),
-            max_delay=self.extractor.config.source.retries.max_delay,
-            backoff=self.extractor.config.source.retries.backoff_factor,
-            jitter=(0, self.extractor.config.source.retries.jitter),
-            tries=self.extractor.config.source.retries.number,
-            delay=self.extractor.config.source.retries.delay,
+            max_delay=self.config.source.retries.max_delay,
+            backoff=self.config.source.retries.backoff_factor,
+            jitter=(0, self.config.source.retries.jitter),
+            tries=self.config.source.retries.number,
+            delay=self.config.source.retries.delay,
         )
         def inner_call() -> Response:
             resp = requests.request(
-                method=self.endpoint.method.value,
-                url=str(url),
-                data=_format_body(self.endpoint.body),
-                headers=self.extractor.prepare_headers(self.endpoint),
+                method=endpoint.endpoint.method.value,
+                url=str(endpoint.url),
+                data=_format_body(endpoint.endpoint.body),
+                headers=self.prepare_headers(endpoint.endpoint),
             )
             status = HTTPStatus(resp.status_code)
             self.logger.debug(f"Response {resp.status_code}: {status.name} {status.description} - {resp.reason}")
@@ -451,70 +498,27 @@ class EndpointRunner:
             if isinstance(data, list):
                 data = {"items": data}
 
-            response = dacite.from_dict(self.endpoint.response_type, data)
+            response = dacite.from_dict(endpoint.endpoint.response_type, data)
 
-            result = self.endpoint.implementation(response)
-            self.extractor.handle_output(result)
+            result = endpoint.endpoint.implementation(response)
+            self.handle_output(result)
         except (JSONDecodeError, DaciteError) as e:
             self.logger.error(f"Error while parsing response: {str(e)}")
             raise e
 
-        return HttpCall(url=url, response=response)
+        return HttpCall(url=endpoint.url, response=response)
 
-    def _try_get_next_page(self, previous_call: HttpCall) -> Optional[HttpUrl]:
-        if self.endpoint.next_page is None:
-            return None
-        return self.endpoint.next_page(previous_call)
-
-    def _exhaust_endpoint(self) -> None:
-        try:
-            next_url = HttpUrl(
-                urljoin(
-                    self.extractor.base_url,
-                    self.endpoint.path() if callable(self.endpoint.path) else self.endpoint.path,
-                )
+    def _handle_call_response(self, endpoint: Endpoint, call: HttpCall) -> None:
+        if endpoint.next_page is None:
+            return
+        next_url = endpoint.next_page(call)
+        if next_url is not None:
+            next = HttpEndpointCall(
+                endpoint=endpoint,
+                url=next_url,
+                call_when=0 if endpoint.interval is None else time.time() + endpoint.interval,
             )
-
-            while next_url is not None and not self.extractor.cancelation_token.is_set():
-                call = self._call(next_url)
-                next_url = self._try_get_next_page(call)
-
-        except Exception as e:
-            # Store exception details, so we can fetch them from the Extractor class later
-            self.error = e
-            raise e
-
-    def run(self) -> None:
-        """
-        Perform all the requests for a given endpoint. Ie, perform initial request, then follow ``next_page`` until no
-        more pages are returned from the callback.
-
-        If the endpoint has an ``interval`` configured, the runner will enter a loop until the extractor's
-        cancelation_token is set.
-
-        ``run()`` spawns a new worker thread, and will return immediately.
-        """
-
-        def loop() -> None:
-            for _ in throttled_loop(
-                target_time=self.endpoint.interval, cancelation_token=self.extractor.cancelation_token
-            ):
-                self._exhaust_endpoint()
-
-        self.threadname = self._get_threadname()
-
-        self.thread = threading.Thread(
-            target=loop if self.endpoint.interval is not None else self._exhaust_endpoint,
-            name=f"EndpointRunner-{self.threadname}",
-        )
-        self.thread.start()
-
-    def join(self) -> None:
-        """
-        Wait for runner to complete.
-        """
-        if self.thread is not None:
-            self.thread.join()
+            self.call_queue.put(PrioritizedEndpointCall(priority=next.call_when, call=next))
 
 
 T = TypeVar("T")
@@ -540,3 +544,12 @@ def _format_body(body: Optional[RequestBodyTemplate]) -> Optional[str]:
             return res
 
     return json.dumps(recursive_get_or_call(body))
+
+
+def _get_initial_url(base_url: str, endpoint: Endpoint) -> HttpUrl:
+    return HttpUrl(
+        urljoin(
+            base_url,
+            endpoint.path() if callable(endpoint.path) else endpoint.path,
+        )
+    )
