@@ -404,7 +404,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
             elif waiting is None:
                 waiting = next
             else:
-                time.sleep(to_wait)
+                time.sleep(min(self._min_check_interval, waiting.call.call_when - time.time()))
 
         return None
 
