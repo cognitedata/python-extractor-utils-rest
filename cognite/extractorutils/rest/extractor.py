@@ -124,7 +124,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         config_class: Type[CustomRestConfig] = RestConfig,
         use_default_state_store: bool = True,
         config_file_path: Optional[str] = None,
-        num_parallel_requests: int = 10
+        num_parallel_requests: int = 10,
     ):
         super(RestExtractor, self).__init__(
             name=name,
@@ -390,11 +390,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
             # accurate.
             if self.n_executing == 0 and self.call_queue.empty():
                 return waiting.call if waiting is not None else None
-            to_wait = (
-                self._min_check_interval
-                if waiting is None
-                else min(self._min_check_interval, waiting.call.call_when - time.time())
-            )
+            to_wait = self._min_check_interval if waiting is None else waiting.call.call_when - time.time()
             if waiting is not None and to_wait <= 0:
                 return waiting.call
             try:

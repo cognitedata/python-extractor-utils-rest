@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "cognite-extractor-utils-rest"
-version = "0.2.3"
+version = "0.3.0"
 description = "REST extention for the Cognite extractor-utils framework"
 authors = ["Mathias Lohne <mathias.lohne@cognite.com>"]
 license = "Apache-2.0"
@@ -21,7 +21,7 @@ line_length=120                # corresponds to -w  flag
 multi_line_output=3            # corresponds to -m  flag
 include_trailing_comma=true    # corresponds to -tc flag
 skip_glob = '^((?!py$).)*$'    # this makes sort all Python files
-known_third_party = ["arrow", "dacite", "requests"]
+known_third_party = ["arrow", "dacite", "requests", "requests_mock"]
 
 [tool.poetry.dependencies]
 python = ">=3.8,<3.11"
