@@ -152,8 +152,6 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         self.call_queue: PriorityQueue[PrioritizedHttpCall] = PriorityQueue()
         self.n_executing = 0
         self._min_check_interval = 1
-        if self.config.extractor.request_parallelism <= 0:
-            raise InvalidConfigError("request-parallelism must be a number greater than 0")
 
     def endpoint(
         self,
@@ -349,6 +347,9 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
 
         self.authentication = AuthenticationProvider(self.config.source.auth)
         self.base_url = self.config.source.base_url or self._default_base_url
+
+        if self.config.extractor.request_parallelism <= 0:
+            raise InvalidConfigError("request-parallelism must be a number greater than 0")
 
         return self
 

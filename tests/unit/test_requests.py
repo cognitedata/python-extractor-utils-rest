@@ -7,7 +7,7 @@ from cognite.extractorutils.uploader_types import RawRow
 from requests_mock import Mocker
 
 from cognite.extractorutils.rest import RestExtractor
-from cognite.extractorutils.rest.http import HttpCall, HttpUrl
+from cognite.extractorutils.rest.http import HttpCallResult, HttpUrl
 
 
 @dataclass
@@ -94,7 +94,7 @@ class TestRequests:
         num_page = 0
         resps = []
 
-        def test_next_page(call: HttpCall) -> Optional[HttpUrl]:
+        def test_next_page(call: HttpCallResult) -> Optional[HttpUrl]:
             nonlocal num_page
             num_page += 1
             if call.response.cursor is not None:
