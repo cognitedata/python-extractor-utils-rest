@@ -25,10 +25,10 @@ from urllib.parse import urljoin
 import dacite
 import requests
 from cognite.extractorutils.configtools import StateStoreConfig
+from cognite.extractorutils.exceptions import InvalidConfigError
 from cognite.extractorutils.retry import retry
 from cognite.extractorutils.uploader_extractor import UploaderExtractor, UploaderExtractorConfig
 from cognite.extractorutils.uploader_types import CdfTypes
-from cognite.extractorutils.exceptions import InvalidConfigError
 from dacite import DaciteError
 from requests import Response
 from requests.exceptions import HTTPError, JSONDecodeError
@@ -36,7 +36,7 @@ from requests.exceptions import HTTPError, JSONDecodeError
 from cognite.extractorutils.rest.authentiaction import AuthConfig, AuthenticationProvider
 from cognite.extractorutils.rest.http import (
     Endpoint,
-    HttpCall,
+    HttpCallResult,
     HttpMethod,
     HttpUrl,
     RequestBody,
@@ -86,6 +86,7 @@ class HttpCall:
         call_when: Some timestamp in seconds since epoch when this should be called. Can be 0 to indicate
             that it should be called as soon as possible.
     """
+
     endpoint: Endpoint
     url: HttpUrl
     # When this endpoint should next be called
@@ -93,7 +94,7 @@ class HttpCall:
 
 
 @dataclass(order=True)
-class PrioritizedEndpointCall:
+class PrioritizedHttpCall:
     priority: float
     call: HttpCall = field(compare=False)
 
@@ -148,7 +149,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         self._default_base_url = base_url or ""
         self.headers: Dict[str, Union[str, Callable[[], str]]] = headers or {}
         self.endpoints: List[Endpoint] = []
-        self.call_queue: PriorityQueue[PrioritizedEndpointCall] = PriorityQueue()
+        self.call_queue: PriorityQueue[PrioritizedHttpCall] = PriorityQueue()
         self.n_executing = 0
         self._min_check_interval = 1
         if self.config.extractor.request_parallelism <= 0:
@@ -164,7 +165,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         headers: Dict[str, Union[str, Callable[[], str]]],
         body: Optional[RequestBodyTemplate],
         response_type: Type[ResponseType],
-        next_page: Optional[Callable[[HttpCall], Optional[HttpUrl]]],
+        next_page: Optional[Callable[[HttpCallResult], Optional[HttpUrl]]],
         interval: Optional[int],
     ) -> Callable[[Callable[[ResponseType], CdfTypes]], Callable[[ResponseType], CdfTypes]]:
         """
@@ -200,7 +201,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         headers: Dict[str, Union[str, Callable[[], str]]],
         body: Optional[RequestBodyTemplate],
         response_type: Type[ResponseType],
-        next_page: Optional[Callable[[HttpCall], Optional[HttpUrl]]],
+        next_page: Optional[Callable[[HttpCallResult], Optional[HttpUrl]]],
         interval: Optional[int],
     ) -> Callable[[Callable[[ResponseType], CdfTypes]], Callable[[ResponseType], CdfTypes]]:
         """
@@ -237,7 +238,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         query: Optional[Dict[str, Any]] = None,
         headers: Optional[Dict[str, Union[str, Callable[[], str]]]] = None,
         response_type: Type[ResponseType],
-        next_page: Optional[Callable[[HttpCall], Optional[HttpUrl]]] = None,
+        next_page: Optional[Callable[[HttpCallResult], Optional[HttpUrl]]] = None,
         interval: Optional[int] = None,
     ) -> Callable[[Callable[[ResponseType], CdfTypes]], Callable[[ResponseType], CdfTypes]]:
         """
@@ -250,7 +251,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
             query: Query parameters. Values can either be values or callables giving values.
             headers: Headers. Values can either be values or callables giving values.
             response_type: Class to deserialize response JSON into
-            next_page: A callable taking an HttpCall and returning the next HttpUrl to make a request to.
+            next_page: A callable taking an HttpCallResult and returning the next HttpUrl to make a request to.
             interval: A target iteration time. If given, the extractor will make periodic requests instead of a single
                 request.
         """
@@ -275,7 +276,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         headers: Optional[Dict[str, Union[str, Callable[[], str]]]] = None,
         body: Optional[RequestBodyTemplate],
         response_type: Type[ResponseType],
-        next_page: Optional[Callable[[HttpCall], Optional[HttpUrl]]] = None,
+        next_page: Optional[Callable[[HttpCallResult], Optional[HttpUrl]]] = None,
         interval: Optional[int] = None,
     ) -> Callable[[Callable[[ResponseType], CdfTypes]], Callable[[ResponseType], CdfTypes]]:
         """
@@ -290,7 +291,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
             body: Request body represented as a dictionary. Will be serialized into JSON. Values can either be values
                 or callables giving values.
             response_type: Class to deserialize response JSON into
-            next_page: A callable taking an HttpCall and returning the next HttpUrl to make a request to.
+            next_page: A callable taking an HttpCallResult and returning the next HttpUrl to make a request to.
             interval: A target iteration time. If given, the extractor will make periodic requests instead of a single
                 request.
         """
@@ -314,7 +315,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         query: Optional[Dict[str, Any]] = None,
         headers: Optional[Dict[str, Union[str, Callable[[], str]]]] = None,
         response_type: Type[ResponseType],
-        next_page: Optional[Callable[[HttpCall], Optional[HttpUrl]]] = None,
+        next_page: Optional[Callable[[HttpCallResult], Optional[HttpUrl]]] = None,
         interval: Optional[int] = None,
     ) -> Callable[[Callable[[ResponseType], CdfTypes]], Callable[[ResponseType], CdfTypes]]:
         """
@@ -327,7 +328,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
             query: Query parameters. Values can either be values or callables giving values.
             headers: Headers. Values can either be values or callables giving values.
             response_type: Class to deserialize response JSON into
-            next_page: A callable taking an HttpCall and returning the next HttpUrl to make a request to.
+            next_page: A callable taking an HttpCallResult and returning the next HttpUrl to make a request to.
             interval: A target iteration time. If given, the extractor will make periodic requests instead of a single
                 request.
         """
@@ -390,7 +391,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         return headers
 
     def _get_next_call(self) -> Optional[HttpCall]:
-        waiting: Optional[PrioritizedEndpointCall] = None
+        waiting: Optional[PrioritizedHttpCall] = None
         while not self.cancelation_token.is_set():
             # If n_executing is set to 0, and the queue is empty here, then we are done
             # This is race condition prone in theory, but it should work. n_executing is
@@ -403,7 +404,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
             if waiting is not None and to_wait <= 0:
                 return waiting.call
             try:
-                next: PrioritizedEndpointCall = self.call_queue.get(block=True, timeout=to_wait)
+                next: PrioritizedHttpCall = self.call_queue.get(block=True, timeout=to_wait)
             except Empty:
                 continue
 
@@ -413,7 +414,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
             elif waiting is None:
                 waiting = next
             else:
-                time.sleep(min(self._min_check_interval, waiting.call.call_when - time.time()))
+                self.cancelation_token.wait(min(self._min_check_interval, waiting.call.call_when - time.time()))
 
         return None
 
@@ -429,7 +430,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
 
         for endpoint in self.endpoints:
             call = HttpCall(endpoint=endpoint, url=_get_initial_url(self.base_url, endpoint), call_when=0)
-            self.call_queue.put(PrioritizedEndpointCall(priority=call.call_when, call=call))
+            self.call_queue.put(PrioritizedHttpCall(priority=call.call_when, call=call))
 
         lock = threading.Lock()
 
@@ -470,7 +471,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
                 )
             )
 
-    def _call(self, endpoint: HttpCall) -> HttpCall:
+    def _call(self, endpoint: HttpCall) -> HttpCallResult:
         self.logger.info(f"{endpoint.endpoint.method.value} {endpoint.url}")
         endpoint.url.add_to_query(endpoint.endpoint.query)
 
@@ -511,9 +512,9 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
             self.logger.error(f"Error while parsing response: {str(e)}")
             raise e
 
-        return HttpCall(url=endpoint.url, response=response)
+        return HttpCallResult(url=endpoint.url, response=response)
 
-    def _handle_call_response(self, endpoint: Endpoint, call: HttpCall) -> None:
+    def _handle_call_response(self, endpoint: Endpoint, call: HttpCallResult) -> None:
         if endpoint.next_page is None:
             return
         next_url = endpoint.next_page(call)
@@ -523,7 +524,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
                 url=next_url,
                 call_when=0 if endpoint.interval is None else time.time() + endpoint.interval,
             )
-            self.call_queue.put(PrioritizedEndpointCall(priority=next.call_when, call=next))
+            self.call_queue.put(PrioritizedHttpCall(priority=next.call_when, call=next))
 
 
 T = TypeVar("T")
