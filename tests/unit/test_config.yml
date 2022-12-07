@@ -1,0 +1,9 @@
+version: 1
+
+cognite:
+  project: test
+  api-key: test
+
+logger:
+  console:
+    level: DEBUG

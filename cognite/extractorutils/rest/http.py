@@ -83,7 +83,7 @@ class HttpUrl:
         return self.__str__()
 
 
-class HttpCall(Generic[ResponseType]):
+class HttpCallResult(Generic[ResponseType]):
     """
     A complete representation of an HTTP call, containing the URL called, the response received, and an ID and timestamp
     for the request.
@@ -106,5 +106,5 @@ class Endpoint(Generic[ResponseType]):
     headers: Dict[str, Union[str, Callable[[], str]]]
     body: Optional[RequestBody]
     response_type: Type[ResponseType]
-    next_page: Optional[Callable[[HttpCall], Optional[HttpUrl]]]
+    next_page: Optional[Callable[[HttpCallResult], Optional[HttpUrl]]]
     interval: Optional[int]
