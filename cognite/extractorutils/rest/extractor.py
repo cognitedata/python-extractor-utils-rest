@@ -28,6 +28,7 @@ from cognite.extractorutils.configtools import StateStoreConfig
 from cognite.extractorutils.retry import retry
 from cognite.extractorutils.uploader_extractor import UploaderExtractor, UploaderExtractorConfig
 from cognite.extractorutils.uploader_types import CdfTypes
+from cognite.extractorutils.exceptions import InvalidConfigError
 from dacite import DaciteError
 from requests import Response
 from requests.exceptions import HTTPError, JSONDecodeError
@@ -65,6 +66,7 @@ class SourceConfig:
 @dataclass
 class ExtractorConfig:
     state_store: StateStoreConfig = StateStoreConfig()
+    request_parallelism: int = 10
 
 
 @dataclass
@@ -74,7 +76,16 @@ class RestConfig(UploaderExtractorConfig):
 
 
 @dataclass
-class HttpEndpointCall:
+class HttpCall:
+    """
+    Class representing a single call to an HTTP endpoint at some point in the future.
+
+    Args:
+        endpoint: The endpoint this call is querying
+        url: The url it will query
+        call_when: Some timestamp in seconds since epoch when this should be called. Can be 0 to indicate
+            that it should be called as soon as possible.
+    """
     endpoint: Endpoint
     url: HttpUrl
     # When this endpoint should next be called
@@ -84,7 +95,7 @@ class HttpEndpointCall:
 @dataclass(order=True)
 class PrioritizedEndpointCall:
     priority: float
-    call: HttpEndpointCall = field(compare=False)
+    call: HttpCall = field(compare=False)
 
 
 CustomRestConfig = TypeVar("CustomRestConfig", bound=RestConfig)
@@ -124,7 +135,6 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         config_class: Type[CustomRestConfig] = RestConfig,
         use_default_state_store: bool = True,
         config_file_path: Optional[str] = None,
-        num_parallel_requests: int = 10,
     ):
         super(RestExtractor, self).__init__(
             name=name,
@@ -141,9 +151,8 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         self.call_queue: PriorityQueue[PrioritizedEndpointCall] = PriorityQueue()
         self.n_executing = 0
         self._min_check_interval = 1
-        if num_parallel_requests <= 0:
-            raise ValueError("num_parallel_requests must be a number greater than 0")
-        self.num_parallel_requests = num_parallel_requests
+        if self.config.extractor.request_parallelism <= 0:
+            raise InvalidConfigError("request-parallelism must be a number greater than 0")
 
     def endpoint(
         self,
@@ -380,7 +389,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
 
         return headers
 
-    def _get_next_call(self) -> Optional[HttpEndpointCall]:
+    def _get_next_call(self) -> Optional[HttpCall]:
         waiting: Optional[PrioritizedEndpointCall] = None
         while not self.cancelation_token.is_set():
             # If n_executing is set to 0, and the queue is empty here, then we are done
@@ -419,14 +428,14 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
             raise ValueError("You must run the extractor in a context manager")
 
         for endpoint in self.endpoints:
-            call = HttpEndpointCall(endpoint=endpoint, url=_get_initial_url(self.base_url, endpoint), call_when=0)
+            call = HttpCall(endpoint=endpoint, url=_get_initial_url(self.base_url, endpoint), call_when=0)
             self.call_queue.put(PrioritizedEndpointCall(priority=call.call_when, call=call))
 
         lock = threading.Lock()
 
-        errors: List[Tuple[Exception, HttpEndpointCall]] = []
+        errors: List[Tuple[Exception, HttpCall]] = []
 
-        def executor_call(endpoint: HttpEndpointCall) -> None:
+        def executor_call(endpoint: HttpCall) -> None:
             try:
                 resp = self._call(endpoint)
                 self._handle_call_response(endpoint.endpoint, resp)
@@ -435,7 +444,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
             with lock:
                 self.n_executing -= 1
 
-        with ThreadPoolExecutor(max_workers=self.num_parallel_requests) as executor:
+        with ThreadPoolExecutor(max_workers=self.config.extractor.request_parallelism) as executor:
 
             def producer_loop() -> None:
                 try:
@@ -461,7 +470,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
                 )
             )
 
-    def _call(self, endpoint: HttpEndpointCall) -> HttpCall:
+    def _call(self, endpoint: HttpCall) -> HttpCall:
         self.logger.info(f"{endpoint.endpoint.method.value} {endpoint.url}")
         endpoint.url.add_to_query(endpoint.endpoint.query)
 
@@ -509,7 +518,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
             return
         next_url = endpoint.next_page(call)
         if next_url is not None:
-            next = HttpEndpointCall(
+            next = HttpCall(
                 endpoint=endpoint,
                 url=next_url,
                 call_when=0 if endpoint.interval is None else time.time() + endpoint.interval,
