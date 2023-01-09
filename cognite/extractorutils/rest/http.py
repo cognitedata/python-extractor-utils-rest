@@ -34,6 +34,7 @@ RequestBodyTemplate = Union[  # type: ignore
     Dict[str, "RequestBodyTemplate"],  # type: ignore
     Callable[[], Dict[str, "RequestBodyTemplate"]],  # type: ignore
 ]
+JsonType = Union[str, int, float, bool, Dict, List]
 
 
 class HttpMethod(Enum):
