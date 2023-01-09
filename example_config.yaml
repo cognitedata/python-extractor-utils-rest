@@ -16,7 +16,16 @@ cognite:
             - ${COGNITE_BASE_URL}/.default
 
 source:
+  # The source base url. The examples read from CDF
+  base_url: ${COGNITE_BASE_URL}/api/v1/projects/${COGNITE_PROJECT}/
   auth:
-    basic:
-      username: user
-      password: pass
+    #basic:
+    #  username: user
+    #  password: pass
+    oauth:
+      token-url: ${COGNITE_TOKEN_URL}
+
+      client-id: ${COGNITE_CLIENT_ID}
+      secret: ${COGNITE_CLIENT_SECRET}
+      scopes:
+          - ${COGNITE_BASE_URL}/.default

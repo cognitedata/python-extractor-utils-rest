@@ -110,7 +110,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         name: Name of the extractor, how it's invoked from the command line.
         description: A short 1-2 sentence description of the extractor.
         version: Version number, following semantic versioning.
-        base_url: Base URL for all calls. Will be ``urljoin``ed with relative paths provided in decorators. If no base
+        default_base_url: Base URL for all calls. Will be ``urljoin``ed with relative paths provided in decorators. If no base
             URL is given, a full URL must be given in each decorator instead. Base URLs can also be given in
             configuration.
         headers: A dictionary of headers to add to every HTTP request.
@@ -130,7 +130,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         name: str,
         description: str,
         version: Optional[str] = None,
-        base_url: Optional[str] = None,
+        default_base_url: Optional[str] = None,
         headers: Optional[Dict[str, Union[str, Callable[[], str]]]] = None,
         cancelation_token: threading.Event = threading.Event(),
         config_class: Type[CustomRestConfig] = RestConfig,
@@ -146,12 +146,56 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
             config_class=config_class,
             config_file_path=config_file_path,
         )
-        self._default_base_url = base_url or ""
+        self._default_base_url = default_base_url or ""
         self.headers: Dict[str, Union[str, Callable[[], str]]] = headers or {}
-        self.endpoints: List[Endpoint] = []
+        self.endpoints: Optional[List[Endpoint]] = []
         self.call_queue: PriorityQueue[PrioritizedHttpCall] = PriorityQueue()
         self.n_executing = 0
         self._min_check_interval = 1
+
+    def add_endpoint_to_list(self, endpoint: Endpoint) -> None:
+        """
+        Add an endpoint to the list of active endpoints. Use this to create new endpoint
+        definitions from inside of other endpoints.
+        """
+        if self.endpoints is not None:
+            self.endpoints.append(endpoint)
+        else:
+            call = HttpCall(endpoint=endpoint, url=_get_initial_url(self.base_url, endpoint), call_when=0)
+            self.call_queue.put(PrioritizedHttpCall(priority=call.call_when, call=call))
+
+    def add_endpoint(
+        self,
+        *,
+        implementation: Callable[[ResponseType], CdfTypes],
+        name: Optional[str] = None,
+        method: HttpMethod,
+        path: Union[str, Callable[[], str]],
+        query: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, Union[str, Callable[[], str]]]] = None,
+        body: Optional[RequestBodyTemplate] = None,
+        response_type: Type[ResponseType],
+        next_page: Optional[Callable[[HttpCallResult], Optional[HttpUrl]]] = None,
+        interval: Optional[int] = None,
+    ) -> None:
+        """
+        Add an endpoint to the list of active endpoints. Use this to create new endpoint
+        definitions from inside of other endpoints.
+        """
+        self.add_endpoint_to_list(
+            Endpoint(
+                name=name,
+                implementation=implementation,
+                method=method,
+                path=path,
+                query=query or {},
+                headers=headers or {},
+                body=body,
+                response_type=response_type,
+                next_page=next_page,
+                interval=interval,
+            )
+        )
 
     def endpoint(
         self,
@@ -171,7 +215,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         """
 
         def decorator(func: Callable[[ResponseType], CdfTypes]) -> Callable[[ResponseType], CdfTypes]:
-            self.endpoints.append(
+            self.add_endpoint_to_list(
                 Endpoint(
                     name=name,
                     implementation=func,
@@ -207,9 +251,8 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         """
 
         def decorator(func: Callable[[ResponseType], CdfTypes]) -> Callable[[ResponseType], CdfTypes]:
-            endpoints = []
             for path in paths:
-                endpoints.append(
+                self.add_endpoint_to_list(
                     Endpoint(
                         name=name,
                         implementation=func,
@@ -223,7 +266,6 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
                         interval=interval,
                     )
                 )
-            self.endpoints.extend(endpoints)
             return func
 
         return decorator
@@ -348,6 +390,12 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         self.authentication = AuthenticationProvider(self.config.source.auth)
         self.base_url = self.config.source.base_url or self._default_base_url
 
+        endpoints = self.endpoints
+        self.endpoints = None
+        if endpoints is not None:
+            for endpoint in endpoints:
+                self.add_endpoint_to_list(endpoint)
+
         if self.config.extractor.request_parallelism <= 0:
             raise InvalidConfigError("request-parallelism must be a number greater than 0")
 
@@ -356,6 +404,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
     def __exit__(
         self, exc_type: Optional[Type[BaseException]], exc_val: Optional[BaseException], exc_tb: Optional[TracebackType]
     ) -> bool:
+        self.endpoints = []
         return super(RestExtractor, self).__exit__(exc_type, exc_val, exc_tb)
 
     def prepare_headers(self, endpoint: Endpoint) -> Dict[str, str]:
@@ -428,10 +477,6 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         """
         if not self.started:
             raise ValueError("You must run the extractor in a context manager")
-
-        for endpoint in self.endpoints:
-            call = HttpCall(endpoint=endpoint, url=_get_initial_url(self.base_url, endpoint), call_when=0)
-            self.call_queue.put(PrioritizedHttpCall(priority=call.call_when, call=call))
 
         lock = threading.Lock()
 
