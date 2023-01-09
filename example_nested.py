@@ -23,6 +23,7 @@ from cognite.extractorutils.rest.http import HttpMethod
 
 # Paginate timeseries belonging to a specific list of assets
 
+
 @dataclass
 class RawAsset:
     externalId: Optional[str]
@@ -36,10 +37,12 @@ class RawTimeSeries:
     name: Optional[str]
     id: Optional[int]
 
+
 @dataclass
 class AssetsList:
     items: List[RawAsset]
     nextCursor: Optional[str]
+
 
 @dataclass
 class TimeSeriesList:
@@ -53,20 +56,15 @@ extractor = RestExtractor(
     version="1.0.0",
 )
 
+
 def get_timeseries_alt(tss: TimeSeriesList) -> Generator[RawRow, None, None]:
     for ts in tss.items:
         yield RawRow(
             db_name="ts_byasset",
             table_name="tss",
-            row=Row(
-                key=ts.id,
-                columns={
-                    "name": ts.name,
-                    "id": ts.id,
-                    "externalId": ts.externalId
-                }
-            )
+            row=Row(key=ts.id, columns={"name": ts.name, "id": ts.id, "externalId": ts.externalId}),
         )
+
 
 @extractor.post("assets/list", body={"filter": {"name": "PubSubGroupType"}, "limit": 1000}, response_type=AssetsList)
 def get_assets_alt(assets: AssetsList) -> Generator[RawRow, None, None]:
@@ -76,23 +74,16 @@ def get_assets_alt(assets: AssetsList) -> Generator[RawRow, None, None]:
         yield RawRow(
             db_name="ts_byasset",
             table_name="assets",
-            row=Row(
-                key=asset.id,
-                columns={
-                    "name": asset.name,
-                    "id": asset.id,
-                    "externalId": asset.externalId
-                }
-            )
+            row=Row(key=asset.id, columns={"name": asset.name, "id": asset.id, "externalId": asset.externalId}),
         )
-    
+
     if len(ids) > 0:
         extractor.add_endpoint(
             method=HttpMethod.POST,
             implementation=get_timeseries_alt,
             path="timeseries/list",
             body={"filter": {"assetSubtreeIds": [{"id": id} for id in ids]}},
-            response_type=TimeSeriesList
+            response_type=TimeSeriesList,
         )
 
 
