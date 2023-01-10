@@ -102,6 +102,8 @@ will be converted to
 }
 ```
 
+This does not apply if the return type is set to `JsonType`.
+
 ## Contributing
 
 We use [poetry](https://python-poetry.org) to manage dependencies and to administrate virtual environments. To develop
