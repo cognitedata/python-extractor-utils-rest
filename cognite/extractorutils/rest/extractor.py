@@ -148,21 +148,24 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         )
         self._default_base_url = default_base_url or ""
         self.headers: Dict[str, Union[str, Callable[[], str]]] = headers or {}
-        self.endpoints: Optional[List[Endpoint]] = []
-        self.call_queue: PriorityQueue[PrioritizedHttpCall] = PriorityQueue()
+        # The list of pending endpoints while the extractor is starting
+        # This is set to None when the extractor is running,
+        # and new endpoints should be added to the call_queue instead.
+        self._initial_endpoints: Optional[List[Endpoint]] = []
+        self._call_queue: PriorityQueue[PrioritizedHttpCall] = PriorityQueue()
         self.n_executing = 0
         self._min_check_interval = 1
 
-    def add_endpoint_to_list(self, endpoint: Endpoint) -> None:
+    def _add_endpoint(self, endpoint: Endpoint) -> None:
         """
         Add an endpoint to the list of active endpoints. Use this to create new endpoint
         definitions from inside of other endpoints.
         """
-        if self.endpoints is not None:
-            self.endpoints.append(endpoint)
+        if self._initial_endpoints is not None:
+            self._initial_endpoints.append(endpoint)
         else:
             call = HttpCall(endpoint=endpoint, url=_get_initial_url(self.base_url, endpoint), call_when=0)
-            self.call_queue.put(PrioritizedHttpCall(priority=call.call_when, call=call))
+            self._call_queue.put(PrioritizedHttpCall(priority=call.call_when, call=call))
 
     def add_endpoint(
         self,
@@ -182,7 +185,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         Add an endpoint to the list of active endpoints. Use this to create new endpoint
         definitions from inside of other endpoints.
         """
-        self.add_endpoint_to_list(
+        self._add_endpoint(
             Endpoint(
                 name=name,
                 implementation=implementation,
@@ -215,7 +218,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         """
 
         def decorator(func: Callable[[ResponseType], CdfTypes]) -> Callable[[ResponseType], CdfTypes]:
-            self.add_endpoint_to_list(
+            self._add_endpoint(
                 Endpoint(
                     name=name,
                     implementation=func,
@@ -252,7 +255,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
 
         def decorator(func: Callable[[ResponseType], CdfTypes]) -> Callable[[ResponseType], CdfTypes]:
             for path in paths:
-                self.add_endpoint_to_list(
+                self._add_endpoint(
                     Endpoint(
                         name=name,
                         implementation=func,
@@ -390,11 +393,11 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         self.authentication = AuthenticationProvider(self.config.source.auth)
         self.base_url = self.config.source.base_url or self._default_base_url
 
-        endpoints = self.endpoints
-        self.endpoints = None
+        endpoints = self._initial_endpoints
+        self._initial_endpoints = None
         if endpoints is not None:
             for endpoint in endpoints:
-                self.add_endpoint_to_list(endpoint)
+                self._add_endpoint(endpoint)
 
         if self.config.extractor.request_parallelism <= 0:
             raise InvalidConfigError("request-parallelism must be a number greater than 0")
@@ -404,7 +407,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
     def __exit__(
         self, exc_type: Optional[Type[BaseException]], exc_val: Optional[BaseException], exc_tb: Optional[TracebackType]
     ) -> bool:
-        self.endpoints = []
+        self._initial_endpoints = []
         return super(RestExtractor, self).__exit__(exc_type, exc_val, exc_tb)
 
     def prepare_headers(self, endpoint: Endpoint) -> Dict[str, str]:
@@ -448,18 +451,18 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
             # only decremented after giving the call a chance to add to the call queue, so
             # either the call is unfinished, and n_executing is > 0, or the queue length is
             # accurate.
-            if self.n_executing == 0 and self.call_queue.empty():
+            if self.n_executing == 0 and self._call_queue.empty():
                 return waiting.call if waiting is not None else None
             to_wait = self._min_check_interval if waiting is None else waiting.call.call_when - time.time()
             if waiting is not None and to_wait <= 0:
                 return waiting.call
             try:
-                next: PrioritizedHttpCall = self.call_queue.get(block=True, timeout=to_wait)
+                next: PrioritizedHttpCall = self._call_queue.get(block=True, timeout=to_wait)
             except Empty:
                 continue
 
             if waiting is not None and next.call.call_when < waiting.call.call_when:
-                self.call_queue.put(waiting)
+                self._call_queue.put(waiting)
                 waiting = next
             elif waiting is None:
                 waiting = next
@@ -570,7 +573,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
                 url=next_url,
                 call_when=0 if endpoint.interval is None else time.time() + endpoint.interval,
             )
-            self.call_queue.put(PrioritizedHttpCall(priority=next.call_when, call=next))
+            self._call_queue.put(PrioritizedHttpCall(priority=next.call_when, call=next))
 
 
 T = TypeVar("T")
