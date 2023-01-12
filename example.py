@@ -48,7 +48,6 @@ extractor = RestExtractor(
     name="Event extractor",
     description="Testytesty",
     version="1.0.0",
-    base_url="https://api.cognitedata.com/api/v1/projects/jetfiretest/",
 )
 
 

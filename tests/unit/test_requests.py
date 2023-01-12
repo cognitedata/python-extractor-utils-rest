@@ -7,7 +7,7 @@ from cognite.extractorutils.uploader_types import RawRow
 from requests_mock import Mocker
 
 from cognite.extractorutils.rest import RestExtractor
-from cognite.extractorutils.rest.http import HttpCallResult, HttpUrl
+from cognite.extractorutils.rest.http import HttpCallResult, HttpMethod, HttpUrl
 
 
 @dataclass
@@ -26,7 +26,7 @@ def get_extractor(idx: int) -> RestExtractor:
         name=f"Test extractor {idx}",
         description="test",
         version="1.0.0",
-        base_url="http://mybaseurl.foo/",
+        default_base_url="http://mybaseurl.foo/",
         config_file_path="tests/unit/test_config.yml",
     )
     extractor.cancelation_token.clear()
@@ -116,3 +116,57 @@ class TestRequests:
         assert len(resps) == 3
         assert resps[0].it == 1
         assert resps[1].it == 2
+
+    def test_nested(self, requests_mock: Mocker) -> None:
+        call1 = requests_mock.get(
+            url="http://mybaseurl.foo/path", json=[{"it": 1, "cursor": None}, {"it": 2, "cursor": None}]
+        )
+        call2 = requests_mock.get(url="http://mybaseurl.foo/path/two", json=[{"it": 2, "cursor": None}])
+        RawMocker(requests_mock)
+        extractor = get_extractor(3)
+
+        def get_test_resp_alt(data: ResponseTypeList) -> Generator[RawRow, None, None]:
+            for item in data.items:
+                yield RawRow("mydb", "mytable", Row(key=item.it, columns={"test": "test"}))
+
+        @extractor.get("path", response_type=ResponseTypeList)
+        def get_test_resp(data: ResponseTypeList) -> Generator[RawRow, None, None]:
+            for item in data.items:
+                extractor.add_endpoint(
+                    method=HttpMethod.GET,
+                    implementation=get_test_resp_alt,
+                    path="path/two",
+                    response_type=ResponseTypeList,
+                )
+                yield RawRow("mydb", "mytable", Row(key=item.it, columns={"test": "test"}))
+
+        with extractor:
+            extractor.run()
+
+        assert call1.call_count == 1
+        assert call2.call_count == 2
+
+    def test_nested_alt(self, requests_mock: Mocker) -> None:
+        call1 = requests_mock.get(
+            url="http://mybaseurl.foo/path", json=[{"it": 1, "cursor": None}, {"it": 2, "cursor": None}]
+        )
+        call2 = requests_mock.get(url="http://mybaseurl.foo/path/two", json=[{"it": 3, "cursor": None}])
+        RawMocker(requests_mock)
+        extractor = get_extractor(4)
+
+        @extractor.get("path", response_type=ResponseTypeList)
+        def get_test_resp(data: ResponseTypeList) -> Generator[RawRow, None, None]:
+            for item in data.items:
+
+                @extractor.get("path/two", response_type=ResponseTypeList)
+                def get_test_resp_alt(data: ResponseTypeList) -> Generator[RawRow, None, None]:
+                    for item in data.items:
+                        yield RawRow("mydb", "mytable", Row(key=item.it, columns={"test": "test"}))
+
+                yield RawRow("mydb", "mytable", Row(key=item.it, columns={"test": "test"}))
+
+        with extractor:
+            extractor.run()
+
+        assert call1.call_count == 1
+        assert call2.call_count == 2
