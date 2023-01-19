@@ -7,8 +7,7 @@ from cognite.extractorutils.uploader_types import RawRow
 from requests_mock import Mocker
 
 from cognite.extractorutils.rest import RestExtractor
-from cognite.extractorutils.rest.http import HttpCallResult, HttpMethod, HttpUrl
-from cognite.extractorutils.rest.http import HttpCallResult, HttpUrl, JsonType, HttpUrl
+from cognite.extractorutils.rest.http import HttpCallResult, HttpMethod, HttpUrl, JsonBody
 
 
 @dataclass
@@ -146,14 +145,14 @@ class TestRequests:
 
         assert call1.call_count == 1
         assert call2.call_count == 2
-        
+
     def test_arbitrary_response(self, requests_mock: Mocker) -> None:
         requests_mock.get(url="http://mybaseurl.foo/path", json=[{"it": 1, "cursor": None}, {"it": 2, "cursor": None}])
         RawMocker(requests_mock)
         extractor = get_extractor(5)
 
-        @extractor.get("path", response_type=JsonType)
-        def get_test_resp(data: JsonType) -> Generator[RawRow, None, None]:
+        @extractor.get("path", response_type=JsonBody)
+        def get_test_resp(data: JsonBody) -> Generator[RawRow, None, None]:
             for item in data:
                 yield RawRow("mydb", "mytable", Row(key=item["it"], columns={"test": "test"}))
 

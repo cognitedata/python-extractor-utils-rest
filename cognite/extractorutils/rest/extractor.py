@@ -39,8 +39,7 @@ from cognite.extractorutils.rest.http import (
     HttpCallResult,
     HttpMethod,
     HttpUrl,
-    JsonType,
-    RequestBody,
+    JsonBody,
     RequestBodyTemplate,
     ResponseType,
 )
@@ -551,7 +550,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
 
         try:
             print(endpoint.endpoint.response_type)
-            if endpoint.endpoint.response_type == JsonType:
+            if endpoint.endpoint.response_type == JsonBody:
                 response = raw_response.json()
             elif endpoint.endpoint.response_type == Response:
                 response = raw_response
@@ -593,7 +592,7 @@ def _format_body(body: Optional[RequestBodyTemplate]) -> Optional[str]:
     if body is None:
         return None
 
-    def recursive_get_or_call(item: RequestBodyTemplate) -> RequestBody:
+    def recursive_get_or_call(item: RequestBodyTemplate) -> JsonBody:
         if isinstance(item, dict):
             return {k: recursive_get_or_call(v) for k, v in item.items()}
         elif isinstance(item, list):

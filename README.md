@@ -79,7 +79,7 @@ with extractor:
 A full example is provided in the [`example.py`](./example.py) file.
 
 ### The return type
-If the return type is set to `cognite.extractorutils.rest.http.JsonType` then the raw json payload will be passed to the handler.
+If the return type is set to `cognite.extractorutils.rest.http.JsonBody` then the raw json payload will be passed to the handler.
 This is useful for cases where the payload is hard or impossible to describe with data classes.
 
 If the return type is set to `requests.Response`, the raw response message itself is passed to the handler.
@@ -102,7 +102,7 @@ will be converted to
 }
 ```
 
-This does not apply if the return type is set to `JsonType`.
+This does not apply if the return type is set to `JsonBody`.
 
 ## Contributing
 
