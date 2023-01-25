@@ -25,7 +25,7 @@ ResponseType = TypeVar("ResponseType")
 
 # Ignoring types here, since recursive types are not yet supported by mypy:  https://github.com/python/mypy/issues/731
 JsonTypes = Union[str, int, float, bool]
-RequestBody = Union[JsonTypes, List["RequestBody"], Dict[str, "RequestBody"]]  # type: ignore
+JsonBody = Union[JsonTypes, List["JsonBody"], Dict[str, "JsonBody"]]  # type: ignore
 RequestBodyTemplate = Union[  # type: ignore
     JsonTypes,
     Callable[[], JsonTypes],
@@ -104,7 +104,7 @@ class Endpoint(Generic[ResponseType]):
     path: Union[str, Callable[[], str]]
     query: Dict[str, Any]
     headers: Dict[str, Union[str, Callable[[], str]]]
-    body: Optional[RequestBody]
+    body: Optional[JsonBody]
     response_type: Type[ResponseType]
     next_page: Optional[Callable[[HttpCallResult], Optional[HttpUrl]]]
     interval: Optional[int]

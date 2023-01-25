@@ -39,7 +39,7 @@ from cognite.extractorutils.rest.http import (
     HttpCallResult,
     HttpMethod,
     HttpUrl,
-    RequestBody,
+    JsonBody,
     RequestBodyTemplate,
     ResponseType,
 )
@@ -490,6 +490,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
                 resp = self._call(endpoint)
                 self._handle_call_response(endpoint.endpoint, resp)
             except Exception as e:
+                self.logger.exception("Error in endpoint {}", endpoint.endpoint.name)
                 errors.append((e, endpoint))
             with lock:
                 self.n_executing -= 1
@@ -548,12 +549,16 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         raw_response = inner_call()
 
         try:
-            data = raw_response.json()
-
-            if isinstance(data, list):
-                data = {"items": data}
-
-            response = dacite.from_dict(endpoint.endpoint.response_type, data)
+            print(endpoint.endpoint.response_type)
+            if endpoint.endpoint.response_type == JsonBody:
+                response = raw_response.json()
+            elif endpoint.endpoint.response_type == Response:
+                response = raw_response
+            else:
+                data = raw_response.json()
+                if isinstance(data, list):
+                    data = {"items": data}
+                response = dacite.from_dict(endpoint.endpoint.response_type, data)
 
             result = endpoint.endpoint.implementation(response)
             self.handle_output(result)
@@ -587,7 +592,7 @@ def _format_body(body: Optional[RequestBodyTemplate]) -> Optional[str]:
     if body is None:
         return None
 
-    def recursive_get_or_call(item: RequestBodyTemplate) -> RequestBody:
+    def recursive_get_or_call(item: RequestBodyTemplate) -> JsonBody:
         if isinstance(item, dict):
             return {k: recursive_get_or_call(v) for k, v in item.items()}
         elif isinstance(item, list):

@@ -78,6 +78,12 @@ with extractor:
 
 A full example is provided in the [`example.py`](./example.py) file.
 
+### The return type
+If the return type is set to `cognite.extractorutils.rest.http.JsonBody` then the raw json payload will be passed to the handler.
+This is useful for cases where the payload is hard or impossible to describe with data classes.
+
+If the return type is set to `requests.Response`, the raw response message itself is passed to the handler.
+
 ### Lists at the root
 Using Python dataclasses we're not able to express JSON structures where the root element 
 is a list. To get around that responses of this nature will be automatically converted to something which can be modeled with Python dataclasses. 
@@ -95,6 +101,8 @@ will be converted to
     "items": [{"object_id": 1}, {"object_id": 2}, {"object_id": 3}]
 }
 ```
+
+This does not apply if the return type is set to `JsonBody`.
 
 ## Contributing
 
