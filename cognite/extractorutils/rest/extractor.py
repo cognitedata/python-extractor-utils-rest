@@ -118,7 +118,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
             extractor
         use_default_state_store: Create a simple instance of the LocalStateStore to provide to the run handle. If false
             a NoStateStore will be created in its place.
-        cancelation_token: An event that will be set when the extractor should shut down, an empty one will be created
+        cancellation_token: An event that will be set when the extractor should shut down, an empty one will be created
             if omitted.
         config_file_path: Optional override to configuration file path
         num_parallel_requests: Maximum number of requests to execute in parallel. Must be greater than 0.
@@ -132,7 +132,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         version: Optional[str] = None,
         default_base_url: Optional[str] = None,
         headers: Optional[Dict[str, Union[str, Callable[[], str]]]] = None,
-        cancelation_token: threading.Event = threading.Event(),
+        cancellation_token: threading.Event = threading.Event(),
         config_class: Type[CustomRestConfig] = RestConfig,
         use_default_state_store: bool = True,
         config_file_path: Optional[str] = None,
@@ -141,7 +141,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
             name=name,
             description=description,
             version=version,
-            cancelation_token=cancelation_token,
+            cancellation_token=cancellation_token,
             use_default_state_store=use_default_state_store,
             config_class=config_class,
             config_file_path=config_file_path,
@@ -445,7 +445,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
 
     def _get_next_call(self) -> Optional[HttpCall]:
         waiting: Optional[PrioritizedHttpCall] = None
-        while not self.cancelation_token.is_set():
+        while not self.cancellation_token.is_set():
             # If n_executing is set to 0, and the queue is empty here, then we are done
             # This is race condition prone in theory, but it should work. n_executing is
             # only decremented after giving the call a chance to add to the call queue, so
@@ -467,7 +467,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
             elif waiting is None:
                 waiting = next
             else:
-                self.cancelation_token.wait(min(self._min_check_interval, waiting.call.call_when - time.time()))
+                self.cancellation_token.wait(min(self._min_check_interval, waiting.call.call_when - time.time()))
 
         return None
 
@@ -476,7 +476,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         Run extractor.
 
         If any of the configured endpoints have the ``interval`` argument set, the extractor will enter a loop until the
-        ``cancelation_token`` is set (for example by an interrupt signal).
+        ``cancellation_token`` is set (for example by an interrupt signal).
         """
         if not self.started:
             raise ValueError("You must run the extractor in a context manager")
@@ -499,7 +499,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
 
             def producer_loop() -> None:
                 try:
-                    while not self.cancelation_token.is_set():
+                    while not self.cancellation_token.is_set():
                         next = self._get_next_call()
                         if next is None:
                             break
@@ -526,7 +526,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         endpoint.url.add_to_query(endpoint.endpoint.query)
 
         @retry(
-            cancelation_token=self.cancelation_token,
+            cancellation_token=self.cancellation_token,
             exceptions=(HTTPError),
             max_delay=self.config.source.retries.max_delay,
             backoff=self.config.source.retries.backoff_factor,
