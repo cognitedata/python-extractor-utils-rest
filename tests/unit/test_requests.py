@@ -29,7 +29,7 @@ def get_extractor(idx: int) -> RestExtractor:
         default_base_url="http://mybaseurl.foo/",
         config_file_path="tests/unit/test_config.yml",
     )
-    extractor.cancelation_token.clear()
+    extractor.cancellation_token.clear()
     extractor._min_check_interval = 0.1
     return extractor
 
