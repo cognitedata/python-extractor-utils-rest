@@ -546,25 +546,28 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
             resp.raise_for_status()
             return resp
 
-        raw_response = inner_call()
+        raw_response: Response = inner_call()
 
-        try:
-            print(endpoint.endpoint.response_type)
-            if endpoint.endpoint.response_type == JsonBody:
-                response = raw_response.json()
-            elif endpoint.endpoint.response_type == Response:
-                response = raw_response
-            else:
-                data = raw_response.json()
-                if isinstance(data, list):
-                    data = {"items": data}
-                response = dacite.from_dict(endpoint.endpoint.response_type, data)
+        if raw_response.status_code == HTTPStatus.NO_CONTENT:
+            response = {}
+        else:
+            try:
+                print(endpoint.endpoint.response_type)
+                if endpoint.endpoint.response_type == JsonBody:
+                    response = raw_response.json()
+                elif endpoint.endpoint.response_type == Response:
+                    response = raw_response
+                else:
+                    data = raw_response.json()
+                    if isinstance(data, list):
+                        data = {"items": data}
+                    response = dacite.from_dict(endpoint.endpoint.response_type, data)
 
-            result = endpoint.endpoint.implementation(response)
-            self.handle_output(result)
-        except (JSONDecodeError, DaciteError) as e:
-            self.logger.error(f"Error while parsing response: {str(e)}")
-            raise e
+                result = endpoint.endpoint.implementation(response)
+                self.handle_output(result)
+            except (JSONDecodeError, DaciteError) as e:
+                self.logger.error(f"Error while parsing response: {str(e)}")
+                raise e
 
         return HttpCallResult(url=endpoint.url, response=response)
 
