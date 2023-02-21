@@ -546,7 +546,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
             resp.raise_for_status()
             return resp
 
-        raw_response: Response = inner_call()
+        raw_response = inner_call()
 
         if raw_response.status_code == HTTPStatus.NO_CONTENT:
             response = {}
