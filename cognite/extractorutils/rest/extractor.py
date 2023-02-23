@@ -549,14 +549,13 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
         raw_response: Response = inner_call()
 
         try:
-            print(endpoint.endpoint.response_type)
-            if endpoint.endpoint.response_type == JsonBody:
-                response = raw_response.json()
-            elif endpoint.endpoint.response_type == Response:
+            if endpoint.endpoint.response_type == Response:
                 response = raw_response
             else:
                 if raw_response.status_code == HTTPStatus.NO_CONTENT:
                     return HttpCallResult(url=endpoint.url, response={})
+                elif endpoint.endpoint.response_type == JsonBody:
+                    response = raw_response.json()
                 else:
                     data = raw_response.json()
                     if isinstance(data, list):
