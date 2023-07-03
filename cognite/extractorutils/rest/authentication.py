@@ -76,7 +76,6 @@ class AuthenticationProvider:
         if self.config.oauth.tenant:
             self.config.oauth.token_url = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
 
-
         response = requests.post(
             self.config.oauth.token_url,
             headers={"Content-Type":"application/x-www-form-urlencoded"},
