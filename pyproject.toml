@@ -27,6 +27,7 @@ known_third_party = ["arrow", "dacite", "requests", "requests_mock"]
 python = ">=3.8,<3.11"
 cognite-extractor-utils = "^5.0.0"
 requests = "^2.27.0"
+pyjwt = "^2.7.0"
 
 [tool.poetry.dev-dependencies]
 black = "*"

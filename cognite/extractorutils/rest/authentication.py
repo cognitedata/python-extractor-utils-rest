@@ -3,6 +3,7 @@ from base64 import b64encode
 from dataclasses import dataclass
 from typing import Any, Optional
 
+import time, jwt
 import requests
 from cognite.extractorutils.configtools.elements import AuthenticatorConfig
 from cognite.extractorutils.exceptions import InvalidConfigError
@@ -46,6 +47,9 @@ class AuthenticationProvider:
 
     """
 
+    _token: str
+    _expiry: int = 0
+
     def __init__(self, config: Optional[AuthConfig]):
         self.config = config
         self.logger = logging.getLogger()
@@ -67,28 +71,37 @@ class AuthenticationProvider:
 
     def _get_token(self) -> str:
         if self.config and self.config.oauth:
-            payload = {
-                "grant_type": "client_credentials",
-                "client_id": self.config.oauth.client_id,
-                "scope": " ".join(self.config.oauth.scopes),
-                "client_secret": self.config.oauth.secret,
-            }
-            if self.config.oauth.audience:
-                payload["audience"] = self.config.oauth.audience
-            if self.config.oauth.tenant:
-                self.config.oauth.token_url = (
-                    f"https://login.microsoftonline.com/{self.config.oauth.tenant}/oauth2/v2.0/token"
+            if self._expiry < int(time.time()):
+                self.logger.info("Using OAuth2, renew token")
+                payload = {
+                    "grant_type": "client_credentials",
+                    "client_id": self.config.oauth.client_id,
+                    "scope": " ".join(self.config.oauth.scopes),
+                    "client_secret": self.config.oauth.secret,
+                }
+                if self.config.oauth.audience:
+                    payload["audience"] = self.config.oauth.audience
+                if self.config.oauth.tenant:
+                    self.config.oauth.token_url = (
+                        f"https://login.microsoftonline.com/{self.config.oauth.tenant}/oauth2/v2.0/token"
+                    )
+
+                response = requests.post(
+                    self.config.oauth.token_url,
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    data=payload,
                 )
+                if response.status_code != 200:
+                    raise InvalidConfigError(response.json())
 
-            response = requests.post(
-                self.config.oauth.token_url,
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-                data=payload,
-            )
-            if response.status_code != 200:
-                raise InvalidConfigError(response.json())
-
-            return response.json()["access_token"]
+                self._token = response.json()["access_token"]
+                try:
+                    decoded_token = jwt.decode(self._token, algorithm="HS256")
+                    if "exp" in decoded_token:
+                        self._expiry = int(decoded_token["exp"]) * 1000
+                except:
+                    self._expiry = time.time() + 1800000
+            return self._token
         else:
             raise InvalidConfigError("No oauth config.")
 
@@ -112,7 +125,7 @@ class AuthenticationProvider:
             return f"Basic {token.decode('utf8')}"
 
         if self.config.oauth:
-            self.logger.info("Using OAuth2")
+            self.logger.debug("Using OAuth2")
             return f"Bearer {self._get_token()}"
 
         raise RuntimeError("Unexpected error: no auth config defined")

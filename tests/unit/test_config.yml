@@ -2,14 +2,3 @@ version: 1
 
 cognite:
   project: test
-  idp-authentication:
-      token-url: ${COGNITE_TOKEN_URL}
-
-      client-id: ${COGNITE_CLIENT_ID}
-      secret: ${COGNITE_CLIENT_SECRET}
-      scopes:
-          - ${COGNITE_BASE_URL}/.default
-          
-logger:
-  console:
-    level: DEBUG
