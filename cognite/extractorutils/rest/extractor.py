@@ -26,9 +26,9 @@ import dacite
 import requests
 from cognite.extractorutils.configtools import StateStoreConfig
 from cognite.extractorutils.exceptions import InvalidConfigError
-from cognite.extractorutils.util import retry
 from cognite.extractorutils.uploader_extractor import UploaderExtractor, UploaderExtractorConfig
 from cognite.extractorutils.uploader_types import CdfTypes
+from cognite.extractorutils.util import retry
 from dacite import DaciteError
 from requests import Response
 from requests.exceptions import HTTPError, JSONDecodeError
