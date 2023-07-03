@@ -67,20 +67,22 @@ class AuthenticationProvider:
 
     def _get_token(self) -> str:
         if self.config and self.config.oauth:
-            payload={
-                    "grant_type": "client_credentials",
-                    "client_id": self.config.oauth.client_id,
-                    "scope": " ".join(self.config.oauth.scopes),
-                    "client_secret": self.config.oauth.secret,
+            payload = {
+                "grant_type": "client_credentials",
+                "client_id": self.config.oauth.client_id,
+                "scope": " ".join(self.config.oauth.scopes),
+                "client_secret": self.config.oauth.secret,
             }
             if self.config.oauth.audience:
                 payload["audience"] = self.config.oauth.audience
             if self.config.oauth.tenant:
-                self.config.oauth.token_url = f"https://login.microsoftonline.com/{self.config.oauth.tenant}/oauth2/v2.0/token"
+                self.config.oauth.token_url = (
+                    f"https://login.microsoftonline.com/{self.config.oauth.tenant}/oauth2/v2.0/token"
+                )
 
             response = requests.post(
                 self.config.oauth.token_url,
-                headers={"Content-Type":"application/x-www-form-urlencoded"},
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
                 data=payload,
             )
             if response.status_code != 200:
@@ -89,7 +91,7 @@ class AuthenticationProvider:
             return response.json()["access_token"]
         else:
             raise InvalidConfigError("No oauth config.")
-    
+
     @property
     def auth_header(self) -> str:
         """
