@@ -560,7 +560,6 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
                     data = raw_response.json()
                     if isinstance(data, list):
                         data = {"items": data}
-
                     response = dacite.from_dict(endpoint.endpoint.response_type, data)
 
             result = endpoint.endpoint.implementation(response)
