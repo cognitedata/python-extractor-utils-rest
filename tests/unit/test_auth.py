@@ -1,10 +1,10 @@
 import unittest
 from unittest.mock import MagicMock
 
-from cognite.extractorutils.authentication import AuthenticatorConfig
+from cognite.extractorutils.configtools.elements import AuthenticatorConfig
 from cognite.extractorutils.exceptions import InvalidConfigError
 
-from cognite.extractorutils.rest.authentiaction import AuthConfig, AuthenticationProvider, BasicAuthConfig
+from cognite.extractorutils.rest.authentication import AuthConfig, AuthenticationProvider, BasicAuthConfig
 
 oauth_config = AuthenticatorConfig(
     client_id="id", scopes=["scp"], secret="verysecret", token_url="https://localhost:8050/token"
