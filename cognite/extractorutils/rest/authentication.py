@@ -1,8 +1,9 @@
-import logging, requests
+import logging
 from base64 import b64encode
 from dataclasses import dataclass
 from typing import Any, Optional
 
+import requests
 from cognite.extractorutils.configtools.elements import AuthenticatorConfig
 from cognite.extractorutils.exceptions import InvalidConfigError
 
