@@ -64,7 +64,7 @@ class AuthenticationProvider:
         """
         return self.config is not None
 
-    def _get_token(self):
+    def _get_token(self) -> str:
         payload={
                 "grant_type": "client_credentials",
                 "client_id": self.config.oauth.client_id,
