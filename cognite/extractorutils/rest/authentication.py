@@ -74,7 +74,7 @@ class AuthenticationProvider:
         if self.config.oauth.audience:
             payload["audience"] = self.config.oauth.audience
         if self.config.oauth.tenant:
-            self.config.oauth.token_url = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
+            self.config.oauth.token_url = f"https://login.microsoftonline.com/{self.config.oauth.tenant}/oauth2/v2.0/token"
 
         response = requests.post(
             self.config.oauth.token_url,
