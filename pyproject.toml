@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "cognite-extractor-utils-rest"
-version = "0.5.0"
+version = "0.6.0"
 description = "REST extention for the Cognite extractor-utils framework"
 authors = ["Mathias Lohne <mathias.lohne@cognite.com>"]
 license = "Apache-2.0"
@@ -25,7 +25,7 @@ known_third_party = ["arrow", "dacite", "requests", "requests_mock"]
 
 [tool.poetry.dependencies]
 python = ">=3.8,<3.11"
-cognite-extractor-utils = "^4.0.0"
+cognite-extractor-utils = "^5.0.0"
 requests = "^2.27.0"
 
 [tool.poetry.dev-dependencies]

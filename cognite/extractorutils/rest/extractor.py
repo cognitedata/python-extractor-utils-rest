@@ -26,14 +26,14 @@ import dacite
 import requests
 from cognite.extractorutils.configtools import StateStoreConfig
 from cognite.extractorutils.exceptions import InvalidConfigError
-from cognite.extractorutils.retry import retry
+from cognite.extractorutils.util import retry
 from cognite.extractorutils.uploader_extractor import UploaderExtractor, UploaderExtractorConfig
 from cognite.extractorutils.uploader_types import CdfTypes
 from dacite import DaciteError
 from requests import Response
 from requests.exceptions import HTTPError, JSONDecodeError
 
-from cognite.extractorutils.rest.authentiaction import AuthConfig, AuthenticationProvider
+from cognite.extractorutils.rest.authentication import AuthConfig, AuthenticationProvider
 from cognite.extractorutils.rest.http import (
     Endpoint,
     HttpCallResult,
@@ -560,6 +560,7 @@ class RestExtractor(UploaderExtractor[CustomRestConfig]):
                     data = raw_response.json()
                     if isinstance(data, list):
                         data = {"items": data}
+
                     response = dacite.from_dict(endpoint.endpoint.response_type, data)
 
             result = endpoint.endpoint.implementation(response)
