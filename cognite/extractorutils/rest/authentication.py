@@ -1,9 +1,10 @@
 import logging
+import time
 from base64 import b64encode
 from dataclasses import dataclass
 from typing import Any, Optional
 
-import time, jwt
+import jwt
 import requests
 from cognite.extractorutils.configtools.elements import AuthenticatorConfig
 from cognite.extractorutils.exceptions import InvalidConfigError
