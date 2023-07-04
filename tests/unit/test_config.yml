@@ -2,3 +2,13 @@ version: 1
 
 cognite:
   project: test
+  idp-authentication:
+    client-id: abc123
+    secret: def567
+    token-url: https://get-a-token.com/token
+    scopes:
+      - https://api.cognitedata.com/.default
+
+logger:
+  console:
+    level: DEBUG

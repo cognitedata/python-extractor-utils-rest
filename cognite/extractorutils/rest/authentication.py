@@ -100,7 +100,7 @@ class AuthenticationProvider:
                     if "exp" in decoded_token:
                         self._expiry = int(decoded_token["exp"]) * 1000
                 except:
-                    self._expiry = time.time() + 1800000
+                    self._expiry = int(time.time()) + 1800000
             return self._token
         else:
             raise InvalidConfigError("No oauth config.")
