@@ -25,7 +25,7 @@ known_third_party = ["arrow", "dacite", "requests", "requests_mock"]
 
 [tool.poetry.dependencies]
 python = ">=3.8,<3.11"
-cognite-extractor-utils = "^4.0.0"
+cognite-extractor-utils = "^7.0.0"
 requests = "^2.27.0"
 
 [tool.poetry.dev-dependencies]
