@@ -24,7 +24,7 @@ skip_glob = '^((?!py$).)*$'    # this makes sort all Python files
 known_third_party = ["arrow", "dacite", "requests", "requests_mock"]
 
 [tool.poetry.dependencies]
-python = ">=3.8,<3.11"
+python = ">=3.13,<3.14"
 cognite-extractor-utils = "^4.0.0"
 requests = "^2.27.0"
 
